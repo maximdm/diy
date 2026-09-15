@@ -86,8 +86,11 @@ The `CanvasEngine` subscribes to the scene and marks itself dirty; it redraws on
   `domain/format.ts`.
 - **The display unit is per project.** `Profile.displayUnit` / `Profile.precision` drive
   `formatLength`, the Inspector fields, dimension labels and the status readout (via
-  `format.mmToDisplay` / `displayToMm`); lists render in the project's unit. Never
-  hardcode a unit in UI text.
+  `format.mmToDisplay` / `displayToMm`); lists render in the project's unit. An optional
+  per-project override is resolved in `Scene.displayUnit` / `Scene.displayPrecision` (set
+  via `scene.setDisplayUnit`) and honoured everywhere — always read the unit/precision
+  through `scene`, never `scene.profile.displayUnit` directly. Never hardcode a unit in
+  UI text.
 - `Camera = { x, y, scale }` where `scale` is **pixels per mm**. Convert with the
   engine's `toWorld` / `toScreen` only.
 - `Profile.gridSize` is in mm. Snapping uses `geometry.snap(value, gridSize)`.
@@ -154,7 +157,9 @@ Keep profiles as data. Do not put behaviour in them.
   a switcher; persistence is not wired, so no saved project can be restored yet. More
   candidates are catalogued in `PROFILE_IDEAS.md`.
 - Dimensions are visual/attached, not constraining; they do not drive part geometry.
-- No notes/tasks yet: `Note` is designed but not implemented (see MILESTONE M3).
+- Notes are implemented (board-anchored + project-level with checkboxes, derived Tasks
+  panel, arrows to parts), but there is no canvas text editing — note text is edited in
+  the Inspector, and note style is fixed (no color/size overrides).
 - `Part.size` (visual footprint) and `Part.dimensions` (physical cut) are decoupled: the
   Inspector edits physical dims, the board resize handle edits the footprint.
 - Only PNG export of the current viewport; no SVG/PDF or BOM export.

@@ -60,6 +60,29 @@ export interface Dimension {
   axis: 'x' | 'y';
 }
 
+export type NoteContextKind = 'general' | 'part' | 'measure';
+
+export interface NoteContext {
+  kind: NoteContextKind;
+  partId?: string;
+  dimensionId?: string;
+}
+
+export interface NoteItem {
+  id: string;
+  text: string;
+  checked: boolean;
+}
+
+export interface Note {
+  id: string;
+  title: string;
+  context: NoteContext;
+  items: NoteItem[];
+  board: boolean;
+  position?: Vec2;
+}
+
 export interface Template {
   id: string;
   name: string;

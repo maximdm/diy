@@ -1,4 +1,4 @@
-import type { Anchor, Dimension, Material, Part, PartKind, Profile, Template, Vec2 } from '../domain/types';
+import type { Anchor, Dimension, Material, Note, NoteItem, Part, PartKind, Profile, Template, Unit, Vec2 } from '../domain/types';
 import { anchorCandidates, snap } from './geometry';
 
 type Listener = () => void;
@@ -6,8 +6,10 @@ type Listener = () => void;
 interface Snapshot {
   parts: Part[];
   dimensions: Dimension[];
+  notes: Note[];
   selectedPartId: string | null;
   selectedDimensionId: string | null;
+  selectedNoteId: string | null;
 }
 
 const HIST_LIMIT = 100;
@@ -24,11 +26,16 @@ export class Scene {
   profile: Profile;
   parts: Part[] = [];
   dimensions: Dimension[] = [];
+  notes: Note[] = [];
   customMaterials: Material[] = [];
   customTemplates: Template[] = [];
   selectedPartId: string | null = null;
   selectedDimensionId: string | null = null;
+  selectedNoteId: string | null = null;
   version = 0;
+
+  private displayUnitOverride: Unit | null = null;
+  private displayPrecisionOverride: number | null = null;
 
   private listeners = new Set<Listener>();
   private counter = 0;
@@ -40,6 +47,21 @@ export class Scene {
 
   constructor(profile: Profile) {
     this.profile = profile;
+  }
+
+  get displayUnit(): Unit {
+    return this.displayUnitOverride ?? this.profile.displayUnit;
+  }
+
+  get displayPrecision(): number {
+    return this.displayPrecisionOverride ?? this.profile.precision;
+  }
+
+  setDisplayUnit(unit: Unit | null): void {
+    this.displayUnitOverride = unit;
+    this.displayPrecisionOverride =
+      unit === 'mm' ? 0 : unit === 'cm' || unit === 'm' || unit === 'in' ? (unit === 'cm' ? 1 : 2) : null;
+    this.touch();
   }
 
   subscribe = (listener: Listener): (() => void) => {
@@ -71,8 +93,10 @@ export class Scene {
     return {
       parts: clone(this.parts),
       dimensions: clone(this.dimensions),
+      notes: clone(this.notes),
       selectedPartId: this.selectedPartId,
       selectedDimensionId: this.selectedDimensionId,
+      selectedNoteId: this.selectedNoteId,
     };
   }
 
@@ -123,8 +147,10 @@ export class Scene {
   private restore(s: Snapshot): void {
     this.parts = s.parts;
     this.dimensions = s.dimensions;
+    this.notes = s.notes;
     this.selectedPartId = s.selectedPartId;
     this.selectedDimensionId = s.selectedDimensionId;
+    this.selectedNoteId = s.selectedNoteId;
     this.touch();
   }
 
@@ -191,6 +217,7 @@ export class Scene {
     this.record();
     this.parts = this.parts.filter((p) => p.id !== id);
     this.dimensions = this.dimensions.filter((d) => !anchorRefs(d.a, id) && !anchorRefs(d.b, id));
+    this.notes = this.notes.filter((n) => !(n.context.kind === 'part' && n.context.partId === id));
     if (this.selectedPartId === id) this.selectedPartId = null;
     this.touch();
   }
@@ -206,6 +233,7 @@ export class Scene {
   removeDimension(id: string): void {
     this.record();
     this.dimensions = this.dimensions.filter((d) => d.id !== id);
+    this.notes = this.notes.filter((n) => !(n.context.kind === 'measure' && n.context.dimensionId === id));
     if (this.selectedDimensionId === id) this.selectedDimensionId = null;
     this.touch();
   }
@@ -213,12 +241,100 @@ export class Scene {
   selectPart(id: string | null): void {
     this.selectedPartId = id;
     this.selectedDimensionId = null;
+    this.selectedNoteId = null;
     this.touch();
   }
 
   selectDimension(id: string | null): void {
     this.selectedDimensionId = id;
     this.selectedPartId = null;
+    this.selectedNoteId = null;
+    this.touch();
+  }
+
+  noteById(id: string): Note | undefined {
+    return this.notes.find((n) => n.id === id);
+  }
+
+  selectedNote(): Note | undefined {
+    return this.selectedNoteId ? this.noteById(this.selectedNoteId) : undefined;
+  }
+
+  addNote(note: Omit<Note, 'id'>): Note {
+    this.record();
+    const n: Note = { ...note, id: this.nextId('n'), items: (note.items ?? []).map((it) => ({ ...it })) };
+    this.notes.push(n);
+    this.touch();
+    return n;
+  }
+
+  updateNote(id: string, patch: Partial<Note>): void {
+    const n = this.noteById(id);
+    if (!n) return;
+    this.record();
+    Object.assign(n, patch);
+    this.touch();
+  }
+
+  removeNote(id: string): void {
+    this.record();
+    this.notes = this.notes.filter((n) => n.id !== id);
+    if (this.selectedNoteId === id) this.selectedNoteId = null;
+    this.touch();
+  }
+
+  selectNote(id: string | null): void {
+    this.selectedNoteId = id;
+    this.selectedPartId = null;
+    this.selectedDimensionId = null;
+    this.touch();
+  }
+
+  isBoardNote(note: Note): boolean {
+    return note.context.kind !== 'general' || note.board;
+  }
+
+  noteAnchorWorld(note: Note): Vec2 | null {
+    const ctx = note.context;
+    if (ctx.kind === 'part') {
+      const p = this.partById(ctx.partId ?? '');
+      if (!p) return null;
+      return { x: p.position.x, y: p.position.y - 46 };
+    }
+    if (ctx.kind === 'measure') {
+      const d = this.dimensions.find((dm) => dm.id === ctx.dimensionId);
+      if (!d) return null;
+      const a = this.anchorPoint(d.a);
+      const b = this.anchorPoint(d.b);
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 30 };
+    }
+    if (!note.board) return null;
+    return note.position ?? { x: 0, y: 0 };
+  }
+
+  addNoteItem(noteId: string, text: string): void {
+    const n = this.noteById(noteId);
+    if (!n) return;
+    this.record();
+    n.items.push({ id: this.nextId('ni'), text, checked: false });
+    this.touch();
+  }
+
+  updateNoteItem(noteId: string, itemId: string, patch: Partial<NoteItem>): void {
+    const n = this.noteById(noteId);
+    if (!n) return;
+    const it = n.items.find((i) => i.id === itemId);
+    if (!it) return;
+    this.record();
+    Object.assign(it, patch);
+    this.touch();
+  }
+
+  removeNoteItem(noteId: string, itemId: string): void {
+    const n = this.noteById(noteId);
+    if (!n) return;
+    this.record();
+    n.items = n.items.filter((i) => i.id !== itemId);
     this.touch();
   }
 
@@ -260,8 +376,10 @@ export class Scene {
     this.record();
     this.parts = [];
     this.dimensions = [];
+    this.notes = [];
     this.selectedPartId = null;
     this.selectedDimensionId = null;
+    this.selectedNoteId = null;
     this.touch();
   }
 }

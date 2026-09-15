@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Icon, type IconName } from './Icon';
-import type { Profile } from '../domain/types';
+import type { Profile, Unit } from '../domain/types';
 import type { Tool } from '../engine/canvasEngine';
 
 interface Props {
@@ -8,6 +9,13 @@ interface Props {
   profileId: string;
   tool: Tool;
   canvasColor: string;
+  displayUnit: Unit | null;
+  gridVisible: boolean;
+  verticalLines: boolean;
+  horizontalLines: boolean;
+  gridOpacity: number;
+  snapEnabled: boolean;
+  rulersVisible: boolean;
   canUndo: boolean;
   canRedo: boolean;
   templates: { id: string; name: string }[];
@@ -18,6 +26,13 @@ interface Props {
   onFit: () => void;
   onExport: () => void;
   onCanvasColor: (color: string) => void;
+  onUnit: (unit: Unit | null) => void;
+  onGridVisible: (v: boolean) => void;
+  onVerticalLines: (v: boolean) => void;
+  onHorizontalLines: (v: boolean) => void;
+  onGridOpacity: (v: number) => void;
+  onSnapEnabled: (v: boolean) => void;
+  onRulersVisible: (v: boolean) => void;
   onUndo: () => void;
   onRedo: () => void;
   onNew: () => void;
@@ -25,7 +40,7 @@ interface Props {
 }
 
 const TOOLS: { id: Tool; label: string; hint: string; icon: IconName }[] = [
-  { id: 'select', label: 'Select', hint: 'Move / resize parts', icon: 'select' },
+  { id: 'select', label: 'Select', hint: 'Move / resize parts and notes', icon: 'select' },
   { id: 'part', label: 'Part', hint: 'Draw a new part', icon: 'part' },
   { id: 'custom', label: 'Custom', hint: 'Build a precise part in the side panel', icon: 'custom' },
   { id: 'dimension', label: 'Measure', hint: 'Add a linked dimension', icon: 'measure' },
@@ -39,6 +54,13 @@ export function Toolbar({
   profileId,
   tool,
   canvasColor,
+  displayUnit,
+  gridVisible,
+  verticalLines,
+  horizontalLines,
+  gridOpacity,
+  snapEnabled,
+  rulersVisible,
   canUndo,
   canRedo,
   templates,
@@ -49,11 +71,19 @@ export function Toolbar({
   onFit,
   onExport,
   onCanvasColor,
+  onUnit,
+  onGridVisible,
+  onVerticalLines,
+  onHorizontalLines,
+  onGridOpacity,
+  onSnapEnabled,
+  onRulersVisible,
   onUndo,
   onRedo,
   onNew,
   onClear,
 }: Props) {
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <header className="toolbar">
       <div className="brand">
@@ -151,13 +181,91 @@ export function Toolbar({
           <Icon name="export" />
           <span className="btn-label">PNG</span>
         </button>
-        <label className="color-btn" title="Board color">
-          <input type="color" value={canvasColor} onChange={(e) => onCanvasColor(e.target.value)} />
-          <span className="color-btn-label">
+        <div className="board-menu">
+          {menuOpen && <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setMenuOpen((o) => !o)}
+            title="Board options — units, grid, snap, rulers"
+            aria-expanded={menuOpen}
+          >
             <Icon name="board" />
             <span className="btn-label">Board</span>
-          </span>
-        </label>
+          </button>
+          {menuOpen && (
+            <div className="board-menu-drop">
+              <label className="field">
+                <span>Units</span>
+                <select
+                  className="select"
+                  value={displayUnit ?? ''}
+                  onChange={(e) => onUnit(e.target.value ? (e.target.value as Unit) : null)}
+                >
+                  <option value="">Auto ({profile.displayUnit})</option>
+                  <option value="mm">Millimetres</option>
+                  <option value="cm">Centimetres</option>
+                  <option value="m">Metres</option>
+                  <option value="in">Inches</option>
+                </select>
+              </label>
+              <label className="field check">
+                <input type="checkbox" checked={gridVisible} onChange={(e) => onGridVisible(e.target.checked)} />
+                <span>Grid lines</span>
+              </label>
+              <div className="board-submenu">
+                <label className="field check">
+                  <input
+                    type="checkbox"
+                    checked={verticalLines}
+                    onChange={(e) => onVerticalLines(e.target.checked)}
+                  />
+                  <span>Vertical lines</span>
+                </label>
+                <label className="field check">
+                  <input
+                    type="checkbox"
+                    checked={horizontalLines}
+                    onChange={(e) => onHorizontalLines(e.target.checked)}
+                  />
+                  <span>Horizontal lines</span>
+                </label>
+                <label className="field range-row">
+                  <span>Grid opacity</span>
+                  <div className="range-input">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={gridOpacity}
+                      onChange={(e) => onGridOpacity(Number(e.target.value))}
+                    />
+                    <output>{gridOpacity}%</output>
+                  </div>
+                </label>
+              </div>
+              <label className="field check">
+                <input type="checkbox" checked={snapEnabled} onChange={(e) => onSnapEnabled(e.target.checked)} />
+                <span>Snap to grid</span>
+              </label>
+              <label className="field check">
+                <input type="checkbox" checked={rulersVisible} onChange={(e) => onRulersVisible(e.target.checked)} />
+                <span>Rulers around the board</span>
+              </label>
+              <label className="field">
+                <span>Board color</span>
+                <input
+                  type="color"
+                  value={canvasColor}
+                  onChange={(e) => {
+                    onCanvasColor(e.target.value);
+                    e.currentTarget.blur();
+                  }}
+                />
+              </label>
+            </div>
+          )}
+        </div>
         <button type="button" className="btn" onClick={onNew} title="Start a fresh board">
           <Icon name="new" />
           <span className="btn-label">New</span>

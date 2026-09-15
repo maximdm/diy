@@ -23,8 +23,8 @@ const SHAPES: { value: PartShape; label: string }[] = [
 ];
 
 export function ToolContext({ scene, tool, kindId, partShape, customSpec, onKind, onPartShape, onCustomSpec }: Props) {
-  const unit = scene.profile.displayUnit;
-  const precision = scene.profile.precision;
+  const unit = scene.displayUnit;
+  const precision = scene.displayPrecision;
 
   if (tool === 'custom') {
     return <CustomPartBuilder scene={scene} spec={customSpec} onChange={onCustomSpec} />;

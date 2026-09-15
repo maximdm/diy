@@ -5,6 +5,7 @@ export type IconName =
   | 'part'
   | 'custom'
   | 'measure'
+  | 'note'
   | 'pan'
   | 'template'
   | 'fit'
@@ -29,6 +30,13 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <rect x="2.5" y="8" width="19" height="8" rx="1.6" />
       <path d="M7 8v3M11 8v4M15 8v3M19 8v4" />
+    </>
+  ),
+  note: (
+    <>
+      <rect x="3.5" y="4" width="16" height="16" rx="2" />
+      <path d="M15 4v5h5" />
+      <path d="M7.5 11.5h7M7.5 14.5h4.5" />
     </>
   ),
   pan: (

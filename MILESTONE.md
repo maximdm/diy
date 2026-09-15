@@ -52,13 +52,13 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
 
 **Goal:** the board becomes a project plan for both the garden ladder *and* the tomatoes.
 
-- [ ] Board-anchored notes (positioned text on the board).
-- [ ] Project-level notes (live in the project, not on the board).
-- [ ] Note checkboxes; derived **Tasks panel** (unchecked notes = to-dos, computed like
+- [x] Board-anchored notes (positioned text on the board).
+- [x] Project-level notes (live in the project, not on the board).
+- [x] Note checkboxes; derived **Tasks panel** (unchecked notes = to-dos, computed like
       the BOM, never stored).
-- [ ] Arrows linking notes to parts; an arrow stores a `partId` and its endpoint follows
+- [x] Arrows linking notes to parts; an arrow stores a `partId` and its endpoint follows
       the part like a dimension anchor.
-- [ ] Acceptance: a garden-ladder and a tomato-planting board both end as sketch + notes
+- [x] Acceptance: a garden-ladder and a tomato-planting board both end as sketch + notes
       + measurements + tasks + purchasing list.
 
 ## M4 — Editing ergonomics

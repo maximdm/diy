@@ -18,8 +18,8 @@ export function BomPanel({ scene, version }: Props) {
       total: bomTotal(computeBom(materials, parts)),
     };
   }, [scene, version]);
-  const unit = scene.profile.displayUnit;
-  const precision = scene.profile.precision;
+  const unit = scene.displayUnit;
+  const precision = scene.displayPrecision;
   const dims = (c: { length: number; width: number; thickness: number }) =>
     `${mmToDisplay(c.length, unit).toFixed(precision)} x ${mmToDisplay(c.width, unit).toFixed(precision)} x ${mmToDisplay(c.thickness, unit).toFixed(precision)} ${unit}`;
 

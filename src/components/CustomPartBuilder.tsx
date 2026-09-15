@@ -48,7 +48,7 @@ const ROLES: { value: MaterialRole; label: string }[] = [
 ];
 
 export function CustomPartBuilder({ scene, spec, onChange }: Props) {
-  const unit = scene.profile.displayUnit;
+  const unit = scene.displayUnit;
   const custom = spec.materialId === CUSTOM;
 
   const pickCustom = () => {

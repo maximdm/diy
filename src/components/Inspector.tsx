@@ -35,20 +35,33 @@ function NumberField({
 export function Inspector({ scene, version }: Props) {
   void version;
   const part: Part | undefined = scene.selectedPart();
+  const note = scene.selectedNote();
+
+  if (note) {
+    return (
+      <section className="panel">
+        <h2>Selection</h2>
+        <p className="muted">
+          A note is selected. Edit its title, items and attachment in the <strong>Notes</strong> panel — each item is
+          a task you can tick off.
+        </p>
+      </section>
+    );
+  }
 
   if (!part) {
     return (
       <section className="panel">
         <h2>Selection</h2>
-        <p className="muted">Select a part to edit its size, material and quantity.</p>
+        <p className="muted">Select a part to edit its size, material and quantity, or a note to edit its text.</p>
       </section>
     );
   }
 
   const kind = scene.kind(part.kindId);
   const material = scene.material(part.materialId);
-  const unit = scene.profile.displayUnit;
-  const precision = scene.profile.precision;
+  const unit = scene.displayUnit;
+  const precision = scene.displayPrecision;
   const update = (patch: Partial<Part>) => scene.updatePart(part.id, patch);
 
   return (

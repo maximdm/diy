@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { profileById, profiles } from './domain/profiles';
 import { furniture } from './domain/profiles/furniture';
-import type { PartShape, Profile } from './domain/types';
+import type { PartShape, Profile, Unit } from './domain/types';
 import { Scene } from './engine/scene';
 import { CanvasEngine, type CustomPartSpec, type Tool } from './engine/canvasEngine';
 import { CanvasView } from './components/CanvasView';
@@ -9,6 +9,7 @@ import { Toolbar } from './components/Toolbar';
 import { FloatingTools } from './components/FloatingTools';
 import { BomPanel } from './components/BomPanel';
 import { Inspector } from './components/Inspector';
+import { TasksPanel } from './components/TasksPanel';
 import { ToolContext } from './components/ToolContext';
 
 export default function App() {
@@ -31,6 +32,13 @@ export default function App() {
   const [pendingProfile, setPendingProfile] = useState<Profile | null>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [saveName, setSaveName] = useState('');
+  const [displayUnit, setDisplayUnit] = useState<Unit | null>(null);
+  const [gridVisible, setGridVisible] = useState(true);
+  const [verticalLines, setVerticalLines] = useState(true);
+  const [horizontalLines, setHorizontalLines] = useState(true);
+  const [gridOpacity, setGridOpacity] = useState(100);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [rulersVisible, setRulersVisible] = useState(false);
 
   const version = useSyncExternalStore(scene.subscribe, () => scene.version);
 
@@ -41,8 +49,14 @@ export default function App() {
       engine.setPartKind(scene.profile.partKinds[0]?.id ?? '');
       engine.setPartShape(partShape);
       engine.setCustomSpec(customSpec);
+      engine.setGridVisible(gridVisible);
+      engine.setVerticalLinesVisible(verticalLines);
+      engine.setHorizontalLinesVisible(horizontalLines);
+      engine.setGridOpacity(gridOpacity);
+      engine.setSnapEnabled(snapEnabled);
+      engine.setRulersVisible(rulersVisible);
     },
-    [scene, partShape, customSpec],
+    [scene, partShape, customSpec, gridVisible, verticalLines, horizontalLines, gridOpacity, snapEnabled, rulersVisible],
   );
 
   const handleTool = useCallback((t: Tool) => {
@@ -144,6 +158,44 @@ export default function App() {
     engineRef.current?.setCanvasColor(color);
   }, []);
 
+  const handleUnit = useCallback(
+    (u: Unit | null) => {
+      setDisplayUnit(u);
+      scene.setDisplayUnit(u);
+    },
+    [scene],
+  );
+
+  const handleGridVisible = useCallback((v: boolean) => {
+    setGridVisible(v);
+    engineRef.current?.setGridVisible(v);
+  }, []);
+
+  const handleVerticalLines = useCallback((v: boolean) => {
+    setVerticalLines(v);
+    engineRef.current?.setVerticalLinesVisible(v);
+  }, []);
+
+  const handleHorizontalLines = useCallback((v: boolean) => {
+    setHorizontalLines(v);
+    engineRef.current?.setHorizontalLinesVisible(v);
+  }, []);
+
+  const handleGridOpacity = useCallback((v: number) => {
+    setGridOpacity(v);
+    engineRef.current?.setGridOpacity(v);
+  }, []);
+
+  const handleSnapEnabled = useCallback((v: boolean) => {
+    setSnapEnabled(v);
+    engineRef.current?.setSnapEnabled(v);
+  }, []);
+
+  const handleRulersVisible = useCallback((v: boolean) => {
+    setRulersVisible(v);
+    engineRef.current?.setRulersVisible(v);
+  }, []);
+
   const handleCustomSpec = useCallback((spec: CustomPartSpec) => {
     setCustomSpec(spec);
     engineRef.current?.setCustomSpec(spec);
@@ -162,6 +214,13 @@ export default function App() {
         profileId={profileId}
         tool={tool}
         canvasColor={canvasColor}
+        displayUnit={displayUnit}
+        gridVisible={gridVisible}
+        verticalLines={verticalLines}
+        horizontalLines={horizontalLines}
+        gridOpacity={gridOpacity}
+        snapEnabled={snapEnabled}
+        rulersVisible={rulersVisible}
         canUndo={scene.canUndo()}
         canRedo={scene.canRedo()}
         templates={scene.templates}
@@ -172,6 +231,13 @@ export default function App() {
         onFit={() => engineRef.current?.fit()}
         onExport={handleExport}
         onCanvasColor={handleCanvasColor}
+        onUnit={handleUnit}
+        onGridVisible={handleGridVisible}
+        onVerticalLines={handleVerticalLines}
+        onHorizontalLines={handleHorizontalLines}
+        onGridOpacity={handleGridOpacity}
+        onSnapEnabled={handleSnapEnabled}
+        onRulersVisible={handleRulersVisible}
         onUndo={() => scene.undo()}
         onRedo={() => scene.redo()}
         onNew={handleNew}
@@ -195,6 +261,7 @@ export default function App() {
           />
           {tool !== 'part' && tool !== 'dimension' && tool !== 'pan' && <Inspector scene={scene} version={version} />}
           <BomPanel scene={scene} version={version} />
+          <TasksPanel scene={scene} version={version} />
         </aside>
       </div>
       <footer className="statusbar">
