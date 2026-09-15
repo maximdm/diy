@@ -2,6 +2,7 @@ import type { Anchor, Dimension, Material, Note, Part, PartShape, Vec2 } from '.
 import { formatLength, mmToDisplay } from '../domain/format';
 import type { Scene } from './scene';
 import { dist, partContains, pointSegmentDistance, snap } from './geometry';
+import { bytesToBase64, buildPdf } from './pdf';
 
 export type Tool = 'select' | 'part' | 'dimension' | 'pan' | 'custom' | 'note';
 
@@ -48,6 +49,14 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   if (!m) return { r: 247, g: 244, b: 236 };
   const n = parseInt(m[1], 16);
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function svgNum(v: number): string {
+  return String(Math.round(v * 100) / 100);
 }
 
 export class CanvasEngine {
@@ -208,6 +217,217 @@ export class CanvasEngine {
 
   exportPng(): string {
     return this.canvas.toDataURL('image/png');
+  }
+
+  async exportPdf(): Promise<string | null> {
+    const blob = await new Promise<Blob | null>((res) => this.canvas.toBlob(res, 'image/jpeg', 0.92));
+    if (!blob) return null;
+    const pdf = buildPdf({
+      jpeg: new Uint8Array(await blob.arrayBuffer()),
+      imageWidth: this.canvas.width,
+      imageHeight: this.canvas.height,
+      pageWidth: (this.width * 72) / 96,
+      pageHeight: (this.height * 72) / 96,
+    });
+    return `data:application/pdf;base64,${bytesToBase64(pdf)}`;
+  }
+
+  exportSvg(): string {
+    const W = Math.round(this.width);
+    const H = Math.round(this.height);
+    const s: string[] = [];
+    const push = (line: string): void => void s.push(line);
+    const rgb = hexToRgb(this.canvasColor);
+    const dark = rgb.r * 0.299 + rgb.g * 0.587 + rgb.b * 0.114 < 128;
+    const trim = (t: string, maxW: number): string => (t.length * 6 <= maxW ? t : `${t.slice(0, Math.max(1, Math.floor(maxW / 6) - 1))}…`);
+
+    push(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="system-ui, sans-serif">`,
+    );
+    push(`<rect width="${W}" height="${H}" fill="${this.canvasColor}"/>`);
+
+    if (this.gridVisible) {
+      const k = this.gridOpacity / 100;
+      const minor = dark ? `rgba(255,255,255,${0.14 * k})` : `rgba(0,0,0,${0.09 * k})`;
+      const major = dark ? `rgba(255,255,255,${0.28 * k})` : `rgba(0,0,0,${0.22 * k})`;
+      let step = this.scene.profile.gridSize;
+      while (step * this.cam.scale < 7) step *= 5;
+      const right = this.cam.x + W / this.cam.scale;
+      const bottom = this.cam.y + H / this.cam.scale;
+      const majorStep = step * 5;
+      if (this.verticalLinesVisible) {
+        const vert: string[] = [];
+        for (let x = Math.floor(this.cam.x / step) * step; x <= right; x += step) {
+          const sx = svgNum((x - this.cam.x) * this.cam.scale);
+          const color = Math.abs(x % majorStep) < step / 2 ? major : minor;
+          vert.push(`<line x1="${sx}" y1="0" x2="${sx}" y2="${H}" stroke="${color}" stroke-width="1"/>`);
+        }
+        vert.forEach((l) => push(l));
+      }
+      if (this.horizontalLinesVisible) {
+        for (let y = Math.floor(this.cam.y / step) * step; y <= bottom; y += step) {
+          const sy = svgNum((y - this.cam.y) * this.cam.scale);
+          const color = Math.abs(y % majorStep) < step / 2 ? major : minor;
+          push(`<line x1="0" y1="${sy}" x2="${W}" y2="${sy}" stroke="${color}" stroke-width="1"/>`);
+        }
+      }
+    }
+
+    for (const part of this.scene.parts) this.svgPart(push, part);
+    for (const dim of this.scene.dimensions) this.svgDimension(push, dim, trim);
+    for (const note of this.scene.notes) {
+      if (this.scene.isBoardNote(note)) this.svgNote(push, note, trim);
+    }
+
+    push('</svg>');
+    return s.join('\n');
+  }
+
+  private svgPart(push: (line: string) => void, part: Part): void {
+    const s = this.toScreen(part.position);
+    const w = part.size.x * this.cam.scale;
+    const h = part.size.y * this.cam.scale;
+    const x = svgNum(s.x);
+    const y = svgNum(s.y);
+    const wpx = svgNum(w);
+    const hpx = svgNum(h);
+    const mat = this.scene.material(part.materialId);
+    const selected = part.id === this.scene.selectedPartId;
+    const fill = part.color ?? mat?.color ?? '#cfcfcf';
+    const stroke = selected ? '#2f6df6' : 'rgba(60,50,35,0.55)';
+    const sw = selected ? 2 : 1;
+    const shape = part.shape ?? 'rect';
+    const label = part.quantity > 1 ? `${part.label} x${part.quantity}` : part.label;
+    if (shape === 'line') {
+      push(
+        `<line x1="${svgNum(s.x + h / 2)}" y1="${svgNum(s.y + h / 2)}" x2="${svgNum(s.x + w - h / 2)}" y2="${svgNum(s.y + h / 2)}" stroke="${fill}" stroke-width="${Math.max(2, h)}" stroke-linecap="round" opacity="0.92"/>`,
+      );
+      push(
+        `<line x1="${svgNum(s.x + h / 2)}" y1="${svgNum(s.y + h / 2)}" x2="${svgNum(s.x + w - h / 2)}" y2="${svgNum(s.y + h / 2)}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round"/>`,
+      );
+      return;
+    }
+    if (shape === 'circle') {
+      push(
+        `<ellipse cx="${svgNum(s.x + w / 2)}" cy="${svgNum(s.y + h / 2)}" rx="${svgNum(w / 2)}" ry="${svgNum(h / 2)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" opacity="0.92"/>`,
+      );
+    } else if (shape === 'triangle') {
+      push(
+        `<polygon points="${svgNum(s.x + w / 2)},${y} ${x},${svgNum(s.y + h)} ${svgNum(s.x + w)},${svgNum(s.y + h)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" opacity="0.92"/>`,
+      );
+    } else {
+      push(`<rect x="${x}" y="${y}" width="${wpx}" height="${hpx}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" opacity="0.92"/>`);
+    }
+    if (w > 46 && h > 15) {
+      push(
+        `<text x="${svgNum(s.x + w / 2)}" y="${svgNum(s.y + h / 2)}" font-size="11" fill="rgba(35,28,18,0.85)" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`,
+      );
+    }
+  }
+
+  private svgDimension(push: (line: string) => void, dim: Dimension, trim: (t: string, w: number) => string): void {
+    const a = this.scene.anchorPoint(dim.a);
+    const b = this.scene.anchorPoint(dim.b);
+    const A = this.toScreen(a);
+    const B = this.toScreen(b);
+    const rgb = hexToRgb(this.canvasColor);
+    const dark = rgb.r * 0.299 + rgb.g * 0.587 + rgb.b * 0.114 < 128;
+    const off = dim.offset * this.cam.scale;
+    const color = dim.id === this.scene.selectedDimensionId ? '#2f6df6' : '#b0442f';
+    const value = formatLength(dim.axis === 'x' ? Math.abs(b.x - a.x) : Math.abs(b.y - a.y), this.scene.displayUnit, this.scene.displayPrecision);
+    const label = trim(value, 120);
+    this.ctx.font = '11px system-ui, sans-serif';
+    const lw = Math.floor(this.ctx.measureText(label).width) + 6;
+    if (dim.axis === 'x') {
+      const y = svgNum(Math.max(A.y, B.y) + off);
+      push(`<path d="M${svgNum(A.x)},${svgNum(A.y)}V${y}M${svgNum(B.x)},${svgNum(B.y)}V${y}M${svgNum(A.x)},${y}H${svgNum(B.x)}" fill="none" stroke="${color}" stroke-width="1"/>`);
+      this.svgArrow(push, A.x, A.y + off, A.x < B.x ? 1 : -1, 'x', color);
+      this.svgArrow(push, B.x, B.y + off, A.x < B.x ? -1 : 1, 'x', color);
+      const cx = svgNum((A.x + B.x) / 2);
+      const cy = svgNum(Math.max(A.y, B.y) + off - 12);
+      push(`<rect x="${svgNum((A.x + B.x) / 2 - lw / 2)}" y="${svgNum(Math.max(A.y, B.y) + off - 21)}" width="${lw}" height="16" fill="${this.canvasColor}"/>`);
+      push(`<text x="${cx}" y="${cy}" font-size="11" fill="${dark ? '#e0d9c8' : '#8a5a33'}" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`);
+    } else {
+      const x = svgNum(Math.max(A.x, B.x) + off);
+      push(`<path d="M${svgNum(A.x)},${svgNum(A.y)}H${x}M${svgNum(B.x)},${svgNum(B.y)}H${x}M${x},${svgNum(A.y)}V${svgNum(B.y)}" fill="none" stroke="${color}" stroke-width="1"/>`);
+      this.svgArrow(push, A.x + off, A.y, A.y < B.y ? 1 : -1, 'y', color);
+      this.svgArrow(push, B.x + off, B.y, A.y < B.y ? -1 : 1, 'y', color);
+      const lx = svgNum(Math.max(A.x, B.x) + off + 8);
+      const cy = svgNum((A.y + B.y) / 2);
+      push(`<text x="${lx}" y="${cy}" font-size="11" fill="${dark ? '#e0d9c8' : '#8a5a33'}" text-anchor="start" dominant-baseline="middle">${esc(label)}</text>`);
+    }
+  }
+
+  private svgArrow(
+    push: (line: string) => void,
+    x: number,
+    y: number,
+    dir: number,
+    axis: 'x' | 'y',
+    color: string,
+  ): void {
+    const s = 5;
+    if (axis === 'x') {
+      push(`<polygon points="${svgNum(x)},${svgNum(y)} ${svgNum(x + dir * s)},${svgNum(y - s * 0.6)} ${svgNum(x + dir * s)},${svgNum(y + s * 0.6)}" fill="${color}"/>`);
+    } else {
+      push(`<polygon points="${svgNum(x)},${svgNum(y)} ${svgNum(x - s * 0.6)},${svgNum(y + dir * s)} ${svgNum(x + s * 0.6)},${svgNum(y + dir * s)}" fill="${color}"/>`);
+    }
+  }
+
+  private svgNote(push: (line: string) => void, note: Note, trim: (t: string, w: number) => string): void {
+    const anchor = this.scene.noteAnchorWorld(note) ?? { x: 0, y: 0 };
+    const p = this.toScreen(anchor);
+    const r = { x: p.x, y: p.y, w: NOTE_MAX_W, h: NOTE_PAD_Y * 2 + NOTE_TITLE_H + Math.max(note.items.length, 1) * NOTE_LINE_H + 2 };
+    const ctxKind = note.context.kind;
+
+    if (ctxKind === 'part' || ctxKind === 'measure') {
+      const target = ctxKind === 'part'
+        ? this.toScreen(this.scene.partById(note.context.partId ?? '')?.position ?? anchor)
+        : (() => {
+            const d = this.scene.dimensions.find((dm) => dm.id === note.context.dimensionId);
+            if (!d) return anchor;
+            const a = this.scene.anchorPoint(d.a);
+            const b = this.scene.anchorPoint(d.b);
+            return this.toScreen({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+          })();
+      const start = this.nearestEdgePoint(target, r);
+      push(`<line x1="${svgNum(start.x)}" y1="${svgNum(start.y)}" x2="${svgNum(target.x)}" y2="${svgNum(target.y)}" stroke="rgba(138,130,114,0.9)" stroke-width="1.5"/>`);
+      const angle = Math.atan2(target.y - start.y, target.x - start.x);
+      const s = 6;
+      push(
+        `<polygon points="${svgNum(target.x)},${svgNum(target.y)} ${svgNum(target.x - s * Math.cos(angle - 0.42))},${svgNum(target.y - s * Math.sin(angle - 0.42))} ${svgNum(target.x - s * Math.cos(angle + 0.42))},${svgNum(target.y - s * Math.sin(angle + 0.42))}" fill="rgba(138,130,114,0.9)"/>`,
+      );
+    }
+
+    const selected = note.id === this.scene.selectedNoteId;
+    const border = selected ? '#2f6df6' : ctxKind === 'general' ? '#d9d1c0' : '#b9a98a';
+    push(
+      `<rect x="${svgNum(r.x)}" y="${svgNum(r.y)}" width="${svgNum(r.w)}" height="${svgNum(r.h)}" rx="8" fill="${selected ? '#e9efff' : '#fffdf9'}" stroke="${border}" stroke-width="${selected ? 2 : 1}"/>`,
+    );
+    const title = trim(note.title.trim() || this.noteDefaultTitle(note), r.w - NOTE_PAD_X * 2);
+    push(
+      `<text x="${svgNum(r.x + NOTE_PAD_X)}" y="${svgNum(r.y + NOTE_PAD_Y + 1)}" font-size="12.5" font-weight="600" fill="#6a5d45" text-anchor="start" dominant-baseline="hanging">${esc(title)}</text>`,
+    );
+    const items = note.items.length ? note.items : [{ id: '', text: '', checked: false }];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const by = r.y + NOTE_PAD_Y + NOTE_TITLE_H + i * NOTE_LINE_H + (NOTE_LINE_H - NOTE_BOX) / 2;
+      const bx = r.x + NOTE_PAD_X;
+      if (it.checked) {
+        push(`<rect x="${svgNum(bx)}" y="${svgNum(by)}" width="${NOTE_BOX}" height="${NOTE_BOX}" rx="3" fill="#2f6df6"/>`);
+        push(
+          `<polyline points="${svgNum(bx + 3.4)},${svgNum(by + NOTE_BOX / 2)} ${svgNum(bx + 5.6)},${svgNum(by + NOTE_BOX - 2.8)} ${svgNum(bx + NOTE_BOX - 2)},${svgNum(by + 3.4)}" fill="none" stroke="#fff" stroke-width="1.6"/>`,
+        );
+      } else {
+        push(`<rect x="${svgNum(bx)}" y="${svgNum(by)}" width="${NOTE_BOX}" height="${NOTE_BOX}" rx="3" fill="#fff" stroke="#bdb3a0"/>`);
+      }
+      const x0 = bx + NOTE_BOX + NOTE_GAP;
+      const textW = r.w - x0 - NOTE_PAD_X;
+      const text = it.text || (note.items.length ? '' : 'Empty note');
+      push(
+        `<text x="${svgNum(x0)}" y="${svgNum(r.y + NOTE_PAD_Y + NOTE_TITLE_H + i * NOTE_LINE_H + 2)}" font-size="12" fill="${it.checked ? 'rgba(120,112,96,0.6)' : '#241f17'}" text-anchor="start" dominant-baseline="hanging">${esc(trim(text, textW))}</text>`,
+      );
+    }
   }
 
   private resize(): void {

@@ -38,7 +38,7 @@ tasks)**. The woodworking BOM/cut list is one specialization of that shape.
 | Board | Infinite canvas, grid + snapping, parts, linked dimensions. |
 | Lists | Derived BOM, cut list, cost. Never manually maintained. |
 | Profiles | Data bundles per domain. Adding a craft is a data file. |
-| Output | PNG/SVG sketches, printable notes + cut lists, shareable project files. |
+| Output | PNG + viewport PDF sketches, printable notes + cut lists, shareable project files. |
 | Notes & Tasks | Board-anchored and project-level notes, checkboxes, arrows to parts, derived to-do list. |
 | Media | Import images, remove backgrounds, annotate/paint on them (aspirational). |
 
@@ -63,6 +63,11 @@ Key decisions (and why):
 - **World units are always millimetres.** Precision issues disappear; display
   conversion happens at the edges (`format.ts`). Every profile uses the same internal
   unit.
+- **Display unit is per project, overridable.** Every length readout goes through
+  `Profile.displayUnit`/`precision`, and a per-project override (`scene.setDisplayUnit`,
+  Auto/mm/cm/m/in) wins where set — a mm profile can be read as inches without touching
+  the data. Always read the unit via `scene.displayUnit`, never `profile.displayUnit`
+  directly.
 - **Profiles are data, not code.** No behaviour in a profile. This is what lets a new
   craft ship as one file.
 - **Derived data is never stored.** BOM/cut list are pure functions of `parts`. This
@@ -107,22 +112,35 @@ with world↔screen conversion via `toWorld`/`toScreen`.
 
 ## 5. Profiles roadmap
 
-Status: gardening, furniture, jewelry, clothes and construction all ship as data-only
-profiles today (MILESTONE M2); `displayUnit`/`precision` drive every length readout.
+Status: **twelve data-only profiles** ship today (MILESTONE M2/M4); `displayUnit`/
+`precision` drive every length readout with an optional per-project override.
 
 | Profile | Units | Parts | Materials | Distinct features |
 |---|---|---|---|---|
-| Garden furniture (v1) | mm | timber, panel, fastener | pine, plywood, screws, oil | cut list, board feet |
-| Woodworking | mm | board, sheet | hardwood, glue | joinery notes, grain direction |
-| Jewelry | mm, 0.1 | ring, bezel, clasp | silver, gold | metal weight, ring sizes |
-| Clothing | cm | pattern piece, seam | fabric, thread | 1:1 scale, seam allowance, yardage |
-| 3D printing | mm | part | filament | grams, print time |
+| Furniture | mm, 0 | timber, sheet, fastener, finish | pine, plywood, screws, oil | cut list, board feet |
+| Woodworking | mm, 0 | board, panel, joinery, hardware, finish | hardwood, ply, dowels, glue | joinery notes, grain direction |
+| Jewelry | mm, 0.1 | band, bezel, wire, sheet, stones | silver, gold, beads | metal weight, ring sizes |
+| Clothing | cm, 1 | pattern piece, band, pocket, trim | fabric, thread, elastic | seam allowance, yardage |
+| Construction | mm, 0 | timber, board, footing, fastener | timber, ply, concrete, screws | footings, decking |
+| Gardening | cm, 0 | bed, plant, seeds, soil, pot | soil, plants, stakes | planting counts, raised beds |
+| Tiling | mm, 0 | tile, trim, fix, substrate, finish | ceramic, adhesive, grout | coverage, grout |
+| Landscaping | mm, 0 | paved, bed, edge, plant, irrigation | pavers, membrane, sleeper | paving, edging |
+| Plumbing | mm, 0 | pipe, fitting, fixture, insulation | copper/pex, elbows, taps | pipe runs, fittings |
+| Electrical | mm, 0 | cable, containment, accessory, lighting, protection | cable, conduit, sockets | circuits, cable runs |
+| Metalwork | mm, 0 | stock, plate, fixing, consumable, finish | steel tube/angle, bolts | stock steel, welding consumables |
+| Leatherworking | mm, 0 | panel, strap, lining, hardware, finish | veg-tan, buckles, rivets | seam/hide allocation |
 
 If adding a row needs engine changes, the abstraction is wrong — change the model.
 
 ## 6. Collaboration and persistence (later)
 
-- **Persistence first** (local project file / localStorage), then a server.
+- **Persistence is landed for the single board** — a `ProjectFile` (schema-versioned JSON)
+  is auto-saved on every change (debounced, flushed on `pagehide`) and restored on boot via
+  localStorage (`src/engine/persistence.ts`; `Scene.serialize()`/`Scene.load()`). It round-trips
+  parts, dimensions, notes, custom materials/templates, `profileId` and the `displayUnit`
+  override. File open/save is done too (`Save project` / `Open project`, `.diy.json`
+  download/upload in the export menu). Still open: project files on disk (multi-board
+  library).
 - **Collaboration** via a CRDT (Yjs) rather than a hand-rolled sync protocol. Store
   `parts`/`dimensions` as the synced document; keep assets (images) in object storage
   and reference them by id.
@@ -147,9 +165,19 @@ as undoable scene updates.
 
 ## 8. Output and export
 
-- Sketch: PNG (done), then SVG (vector, scale-safe), then printable PDF with dimensions.
-- Lists: BOM and cut list to CSV/PDF.
-- Project file: JSON (schema-versioned) that round-trips a `Scene`.
+- Sketch: PNG (done), viewport PDF (done — JPEG embedded via the hand-rolled writer in
+  `src/engine/pdf.ts`, ~96 dpi, no vector drawing) and **SVG** (done — `CanvasEngine.exportSvg()`,
+  world-space vector: board + grid + parts + dimensions + notes). Next is a **true printable
+  sheet** (sketch + dimensions + notes + cut list).
+- **Lists are the real product.** BOM and cut list export to CSV/PDF, grouped by material,
+  with cost totals — but the cut list must be *buyable*: **stock-sheet optimization** takes
+  standard stock sizes (e.g. 2440×1220 plywood, 2400×45×45 pine) and computes how many
+  sheets/lengths to actually purchase, not just raw area/length.
+- **Print-to-scale part templates.** Export a single part at 1:1 so it can be printed, taped
+  to stock and used to mark/drill/cut directly off the paper. Fits the mm world space.
+- Project file: schema-versioned `ProjectFile` JSON that round-trips a `Scene` — auto-saved
+  to localStorage and restored on boot (done), plus file download/upload via `Save project` /
+  `Open project` in the export menu (done).
 
 ## 9. Explicit non-goals (for now)
 
@@ -164,8 +192,10 @@ as undoable scene updates.
 
 Decided so far (see MILESTONE.md for sequencing):
 
-- **Notes/tasks**: one `Note` entity (text + optional checkbox), board-anchored or
-  project-level, optional arrows at parts; the Tasks panel is derived via `computeTasks`.
+- **Notes/tasks**: a `Note` is now a **multi-item checklist** with a `context`
+  (`general | part | measure`); contextual notes anchor to a part/dimension and follow it.
+  The Tasks panel expands every item into a task, grouped by context. Next step is ordered
+  assembly steps (see §11).
 - **Undo/redo**: snapshot-based in `Scene` first; command pattern only if it outgrows
   snapshots.
 - **Paint layer**: deferred with the media milestone, not a part kind.
@@ -177,4 +207,27 @@ Still open:
 - Should a `Dimension` optionally carry a **constraint** (drive geometry) or stay
   visual forever?
 - Do profiles need **parameterized templates** (set length → parts recompute)?
-- Do notes need **multi-item checklists**, or is one checkbox per note enough?
+
+## 11. Next bets: closing the DIY loop
+
+The sketch works; the missing piece is the hand-off from drawing to building. Five
+high-value additions, in priority order:
+
+1. **Persistence (save / open).** Local auto-save to localStorage + restore **is done**,
+      and **file open/save is done too** (`Save project` / `Open project`, `.diy.json`).
+      The board already survives a reload.
+2. **Real shopping artifact from the BOM/cut list.** The most valuable output is *"what do
+   I buy and what does it cost."* Add **stock-sheet optimization** (given standard sizes,
+   compute how many sheets/lengths to buy) and **export the list** to printable PDF + CSV,
+   grouped by material with cost totals. Extends M6.
+3. **Print-to-scale part templates.** Export a part at 1:1 so it can be printed, taped to
+   stock and used to mark/drill/cut. Fits the mm world space; high delight, low cost.
+4. **Dimensions that mean something + rotation.** Most real pieces are angled (mitres,
+   triangles). Add rotation (render/hit-test/resize/anchors) and decide whether a dimension
+   can optionally carry a constraint that drives geometry. Unlocks joinery. Extends M4.
+5. **Build sequence in the to-do list.** Turn notes into ordered assembly steps with the
+   existing part links, so the Tasks panel reads "step 1 … step N" rather than loose
+   reminders.
+
+Recommended first slice: **#1 + #2** — together they turn Draw-Try from a sketchpad into the
+thing you plan a build with and take to the store.

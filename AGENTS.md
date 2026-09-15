@@ -151,17 +151,23 @@ Keep profiles as data. Do not put behaviour in them.
 
 - No rotation support in rendering/hit-testing (`rotation` exists but is unused);
   non-rotated `rect | circle | triangle | line` shapes are supported.
-- No persistence or multiplayer (undo/redo is snapshot-based in `Scene`).
+- Project persistence: `Scene.serialize()`/`Scene.load()` (schema-versioned `ProjectFile`,
+  `src/engine/persistence.ts`) auto-save on change (debounced, flushed on `pagehide`) and
+  restore on boot; file open/save (`Save project` / `Open project`, `.diy.json` download/
+  upload) is wired into the export menu. No disk files, no multiplayer.
 - Twelve profiles ship as data (gardening, furniture, jewelry, clothes, construction,
   woodworking, tiling, landscaping, plumbing, electrical, metalwork, leatherworking) with
-  a switcher; persistence is not wired, so no saved project can be restored yet. More
-  candidates are catalogued in `PROFILE_IDEAS.md`.
+  a switcher (switched boards persist like any other). More candidates are catalogued in
+  `PROFILE_IDEAS.md`.
 - Dimensions are visual/attached, not constraining; they do not drive part geometry.
 - Notes are implemented (board-anchored + project-level with checkboxes, derived Tasks
   panel, arrows to parts), but there is no canvas text editing — note text is edited in
   the Inspector, and note style is fixed (no color/size overrides).
 - `Part.size` (visual footprint) and `Part.dimensions` (physical cut) are decoupled: the
   Inspector edits physical dims, the board resize handle edits the footprint.
-- Only PNG export of the current viewport; no SVG/PDF or BOM export.
+- PNG and PDF export of the current viewport only (PNG lossless; PDF embeds a JPEG of the
+  viewport — hand-rolled writer in `src/engine/pdf.ts`, ~96 dpi page size, no vector
+  drawing, no BOM export). SVG export (`CanvasEngine.exportSvg()`) is world-space vector
+  (board + grid + parts + dimensions + notes), gridded like the canvas, no rulers/handles.
 
 See `MILESTONE.md` for what comes next and `PLAN.md` for the longer-term design.

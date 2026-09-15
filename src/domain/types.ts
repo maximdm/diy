@@ -89,6 +89,21 @@ export interface Template {
   parts: Omit<Part, 'id'>[];
 }
 
+export const PROJECT_FORMAT = 'draw-try';
+export const PROJECT_VERSION = 1;
+
+export interface ProjectFile {
+  format: typeof PROJECT_FORMAT;
+  version: typeof PROJECT_VERSION;
+  profileId: string;
+  displayUnit: Unit | null;
+  customMaterials: Material[];
+  customTemplates: Template[];
+  parts: Part[];
+  dimensions: Dimension[];
+  notes: Note[];
+}
+
 export interface Profile {
   id: string;
   name: string;

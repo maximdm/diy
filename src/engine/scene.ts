@@ -1,4 +1,5 @@
 import type { Anchor, Dimension, Material, Note, NoteItem, Part, PartKind, Profile, Template, Unit, Vec2 } from '../domain/types';
+import { PROJECT_FORMAT, PROJECT_VERSION, type ProjectFile } from '../domain/types';
 import { anchorCandidates, snap } from './geometry';
 
 type Listener = () => void;
@@ -16,6 +17,10 @@ const HIST_LIMIT = 100;
 
 function anchorRefs(a: Anchor, partId: string): boolean {
   return a.kind === 'part' && a.partId === partId;
+}
+
+function unitPrecision(unit: Unit | null): number | null {
+  return unit === 'mm' ? 0 : unit === 'cm' ? 1 : unit === 'm' || unit === 'in' ? 2 : null;
 }
 
 function clone<T>(value: T): T {
@@ -59,8 +64,7 @@ export class Scene {
 
   setDisplayUnit(unit: Unit | null): void {
     this.displayUnitOverride = unit;
-    this.displayPrecisionOverride =
-      unit === 'mm' ? 0 : unit === 'cm' || unit === 'm' || unit === 'in' ? (unit === 'cm' ? 1 : 2) : null;
+    this.displayPrecisionOverride = unitPrecision(unit);
     this.touch();
   }
 
@@ -381,5 +385,50 @@ export class Scene {
     this.selectedDimensionId = null;
     this.selectedNoteId = null;
     this.touch();
+  }
+
+  serialize(): ProjectFile {
+    return {
+      format: PROJECT_FORMAT,
+      version: PROJECT_VERSION,
+      profileId: this.profile.id,
+      displayUnit: this.displayUnitOverride,
+      customMaterials: clone(this.customMaterials),
+      customTemplates: clone(this.customTemplates),
+      parts: clone(this.parts),
+      dimensions: clone(this.dimensions),
+      notes: clone(this.notes),
+    };
+  }
+
+  load(file: ProjectFile): void {
+    this.parts = clone(file.parts);
+    this.dimensions = clone(file.dimensions);
+    this.notes = file.notes.map((n) => ({ ...n, items: (n.items ?? []).map((it) => ({ ...it })) }));
+    this.customMaterials = clone(file.customMaterials ?? []);
+    this.customTemplates = clone(file.customTemplates ?? []);
+    this.displayUnitOverride = file.displayUnit ?? null;
+    this.displayPrecisionOverride = unitPrecision(file.displayUnit ?? null);
+    this.selectedPartId = null;
+    this.selectedDimensionId = null;
+    this.selectedNoteId = null;
+    this.counter = this.maxIdCounter() + 1;
+    this.undoStack = [];
+    this.redoStack = [];
+    this.touch();
+  }
+
+  private maxIdCounter(): number {
+    let max = 0;
+    for (const id of [
+      ...this.parts.map((p) => p.id),
+      ...this.dimensions.map((d) => d.id),
+      ...this.notes.map((n) => n.id),
+      ...this.notes.flatMap((n) => n.items.map((i) => i.id)),
+    ]) {
+      const m = /(\d+)$/.exec(id);
+      if (m) max = Math.max(max, Number(m[1]));
+    }
+    return max;
   }
 }

@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { profileById, profiles } from './domain/profiles';
-import { furniture } from './domain/profiles/furniture';
 import type { PartShape, Profile, Unit } from './domain/types';
 import { Scene } from './engine/scene';
+import { autosave, loadProject, parseProject } from './engine/persistence';
 import { CanvasEngine, type CustomPartSpec, type Tool } from './engine/canvasEngine';
 import { CanvasView } from './components/CanvasView';
 import { Toolbar } from './components/Toolbar';
@@ -12,27 +12,36 @@ import { Inspector } from './components/Inspector';
 import { TasksPanel } from './components/TasksPanel';
 import { ToolContext } from './components/ToolContext';
 
-export default function App() {
-  const scene = useMemo(() => new Scene(furniture), []);
-  const engineRef = useRef<CanvasEngine | null>(null);
-  const [tool, setTool] = useState<Tool>('select');
-  const [kindId, setKindId] = useState(furniture.partKinds[0]?.id ?? '');
-  const [partShape, setPartShape] = useState<PartShape | null>(null);
-  const [status, setStatus] = useState('');
-  const [canvasColor, setCanvasColor] = useState('#f7f4ec');
-  const [customSpec, setCustomSpec] = useState<CustomPartSpec>({
+function defaultCustomSpec(p: Profile): CustomPartSpec {
+  return {
     label: 'Custom part',
-    materialId: furniture.materials[0]?.id ?? '',
+    materialId: p.materials[0]?.id ?? '',
     length: 400,
     width: 200,
     thickness: 20,
     quantity: 1,
-  });
-  const [profileId, setProfileId] = useState(furniture.id);
+  };
+}
+
+export default function App() {
+  const initial = useMemo(() => loadProject(), []);
+  const scene = useMemo(() => {
+    const s = new Scene(profileById(initial?.profileId ?? ''));
+    if (initial) s.load(initial);
+    return s;
+  }, [initial]);
+  const engineRef = useRef<CanvasEngine | null>(null);
+  const [tool, setTool] = useState<Tool>('select');
+  const [kindId, setKindId] = useState(scene.profile.partKinds[0]?.id ?? '');
+  const [partShape, setPartShape] = useState<PartShape | null>(null);
+  const [status, setStatus] = useState('');
+  const [canvasColor, setCanvasColor] = useState('#f7f4ec');
+  const [customSpec, setCustomSpec] = useState<CustomPartSpec>(defaultCustomSpec(scene.profile));
+  const [profileId, setProfileId] = useState(scene.profile.id);
   const [pendingProfile, setPendingProfile] = useState<Profile | null>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [saveName, setSaveName] = useState('');
-  const [displayUnit, setDisplayUnit] = useState<Unit | null>(null);
+  const [displayUnit, setDisplayUnit] = useState<Unit | null>(initial?.displayUnit ?? null);
   const [gridVisible, setGridVisible] = useState(true);
   const [verticalLines, setVerticalLines] = useState(true);
   const [horizontalLines, setHorizontalLines] = useState(true);
@@ -41,6 +50,8 @@ export default function App() {
   const [rulersVisible, setRulersVisible] = useState(false);
 
   const version = useSyncExternalStore(scene.subscribe, () => scene.version);
+
+  useEffect(() => autosave(scene), [scene]);
 
   const onReady = useCallback(
     (engine: CanvasEngine) => {
@@ -84,14 +95,7 @@ export default function App() {
       setProfileId(next.id);
       setPendingProfile(null);
       engineRef.current?.setPartKind(first);
-      const spec = {
-        label: 'Custom part',
-        materialId: next.materials[0]?.id ?? '',
-        length: 400,
-        width: 200,
-        thickness: 20,
-        quantity: 1,
-      };
+      const spec = defaultCustomSpec(next);
       setCustomSpec(spec);
       engineRef.current?.setCustomSpec(spec);
       scene.customMaterials = [];
@@ -152,6 +156,57 @@ export default function App() {
     a.download = `${scene.profile.id}-board.png`;
     a.click();
   }, [scene]);
+
+  const handleExportPdf = useCallback(async () => {
+    const url = await engineRef.current?.exportPdf();
+    if (!url) return;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${scene.profile.id}-board.pdf`;
+    a.click();
+  }, [scene]);
+
+  const handleExportSvg = useCallback(() => {
+    const svg = engineRef.current?.exportSvg();
+    if (!svg) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+    a.download = `${scene.profile.id}-board.svg`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [scene]);
+
+  const handleSaveProject = useCallback(() => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(scene.serialize(), null, 2)], { type: 'application/json' }));
+    a.download = `${scene.profile.id}.diy.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [scene]);
+
+  const handleOpenProject = useCallback(
+    async (file: File) => {
+      const project = parseProject(await file.text());
+      if (!project) {
+        setStatus('Could not open file: not a Draw-Try project');
+        return;
+      }
+      const p = profileById(project.profileId);
+      if (!p) {
+        setStatus(`Could not open file: unknown profile "${project.profileId}"`);
+        return;
+      }
+      scene.profile = p;
+      scene.load(project);
+      setProfileId(p.id);
+      setKindId(p.partKinds[0]?.id ?? '');
+      setDisplayUnit(project.displayUnit ?? null);
+      engineRef.current?.setPartKind(p.partKinds[0]?.id ?? '');
+      engineRef.current?.fit();
+      setStatus(`Opened ${file.name}`);
+    },
+    [scene],
+  );
 
   const handleCanvasColor = useCallback((color: string) => {
     setCanvasColor(color);
@@ -230,6 +285,10 @@ export default function App() {
         onSaveTemplate={handleSaveTemplate}
         onFit={() => engineRef.current?.fit()}
         onExport={handleExport}
+        onExportPdf={handleExportPdf}
+        onExportSvg={handleExportSvg}
+        onSaveProject={handleSaveProject}
+        onOpenProject={handleOpenProject}
         onCanvasColor={handleCanvasColor}
         onUnit={handleUnit}
         onGridVisible={handleGridVisible}

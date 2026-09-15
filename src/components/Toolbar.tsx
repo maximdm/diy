@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Icon, type IconName } from './Icon';
 import type { Profile, Unit } from '../domain/types';
 import type { Tool } from '../engine/canvasEngine';
@@ -25,6 +25,10 @@ interface Props {
   onSaveTemplate: () => void;
   onFit: () => void;
   onExport: () => void;
+  onExportPdf: () => void;
+  onExportSvg: () => void;
+  onSaveProject: () => void;
+  onOpenProject: (file: File) => void;
   onCanvasColor: (color: string) => void;
   onUnit: (unit: Unit | null) => void;
   onGridVisible: (v: boolean) => void;
@@ -70,6 +74,10 @@ export function Toolbar({
   onSaveTemplate,
   onFit,
   onExport,
+  onExportPdf,
+  onExportSvg,
+  onSaveProject,
+  onOpenProject,
   onCanvasColor,
   onUnit,
   onGridVisible,
@@ -84,6 +92,8 @@ export function Toolbar({
   onClear,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   return (
     <header className="toolbar">
       <div className="brand">
@@ -177,10 +187,55 @@ export function Toolbar({
           <Icon name="fit" />
           <span className="btn-label">Fit</span>
         </button>
-        <button type="button" className="btn" onClick={onExport} title="Export the board as a PNG">
-          <Icon name="export" />
-          <span className="btn-label">PNG</span>
-        </button>
+        <div className="board-menu">
+          {exportOpen && <div className="menu-backdrop" onClick={() => setExportOpen(false)} />}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setExportOpen((o) => !o)}
+            title="Export the board as PNG or PDF"
+            aria-expanded={exportOpen}
+          >
+            <Icon name="export" />
+            <span className="btn-label">Export</span>
+          </button>
+          {exportOpen && (
+            <div className="board-menu-drop">
+              <button type="button" className="menu-item" onClick={onExport}>
+                <Icon name="export" />
+                <span>PNG image</span>
+              </button>
+              <button type="button" className="menu-item" onClick={onExportPdf}>
+                <Icon name="export" />
+                <span>PDF document</span>
+              </button>
+              <button type="button" className="menu-item" onClick={onExportSvg}>
+                <Icon name="export" />
+                <span>SVG image</span>
+              </button>
+              <div className="menu-sep" />
+              <button type="button" className="menu-item" onClick={onSaveProject}>
+                <Icon name="export" />
+                <span>Save project (.diy.json)</span>
+              </button>
+              <button type="button" className="menu-item" onClick={() => fileRef.current?.click()}>
+                <Icon name="export" />
+                <span>Open project (.diy.json)</span>
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".diy.json,application/json"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onOpenProject(f);
+                  e.target.value = '';
+                }}
+              />
+            </div>
+          )}
+        </div>
         <div className="board-menu">
           {menuOpen && <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />}
           <button
