@@ -3,12 +3,15 @@ import { Icon, type IconName } from './Icon';
 import type { Profile, Unit } from '../domain/types';
 import type { Tool } from '../engine/canvasEngine';
 
+export type Theme = 'light' | 'grey' | 'dark';
+
 interface Props {
   profile: Profile;
   profiles: Profile[];
   profileId: string;
   tool: Tool;
   canvasColor: string;
+  theme: Theme;
   displayUnit: Unit | null;
   gridVisible: boolean;
   verticalLines: boolean;
@@ -30,6 +33,7 @@ interface Props {
   onSaveProject: () => void;
   onOpenProject: (file: File) => void;
   onCanvasColor: (color: string) => void;
+  onTheme: (theme: Theme) => void;
   onUnit: (unit: Unit | null) => void;
   onGridVisible: (v: boolean) => void;
   onVerticalLines: (v: boolean) => void;
@@ -52,12 +56,15 @@ const TOOLS: { id: Tool; label: string; hint: string; icon: IconName }[] = [
 ];
 export { TOOLS };
 
+const THEMES: Theme[] = ['light', 'grey', 'dark'];
+
 export function Toolbar({
   profile,
   profiles,
   profileId,
   tool,
   canvasColor,
+  theme,
   displayUnit,
   gridVisible,
   verticalLines,
@@ -79,6 +86,7 @@ export function Toolbar({
   onSaveProject,
   onOpenProject,
   onCanvasColor,
+  onTheme,
   onUnit,
   onGridVisible,
   onVerticalLines,
@@ -94,6 +102,28 @@ export function Toolbar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const exportBtnRef = useRef<HTMLButtonElement>(null);
+  const boardBtnRef = useRef<HTMLButtonElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+
+  const positionMenu = (btn: HTMLButtonElement): void => {
+    if (!window.matchMedia('(max-width: 720px)').matches) {
+      setMenuPos(null);
+      return;
+    }
+    const r = btn.getBoundingClientRect();
+    setMenuPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+  };
+
+  const toggleExportMenu = (): void => {
+    setExportOpen((o) => !o);
+    if (!exportOpen && exportBtnRef.current) positionMenu(exportBtnRef.current);
+  };
+
+  const toggleBoardMenu = (): void => {
+    setMenuOpen((o) => !o);
+    if (!menuOpen && boardBtnRef.current) positionMenu(boardBtnRef.current);
+  };
   return (
     <header className="toolbar">
       <div className="brand">
@@ -119,44 +149,45 @@ export function Toolbar({
 
       <div className="toolbar-divider" />
 
-      <div className="tool-group" role="toolbar" aria-label="Tools">
-        {TOOLS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={tool === t.id ? 'tool-btn active' : 'tool-btn'}
-            title={t.hint}
-            aria-pressed={tool === t.id}
-            onClick={() => onTool(t.id)}
-          >
-            <Icon name={t.icon} />
-            <span className="tool-label">{t.label}</span>
-          </button>
-        ))}
-      </div>
+      <div className="toolbar-scroll">
+        <div className="tool-group" role="toolbar" aria-label="Tools">
+          {TOOLS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={tool === t.id ? 'tool-btn active' : 'tool-btn'}
+              title={t.hint}
+              aria-pressed={tool === t.id}
+              onClick={() => onTool(t.id)}
+            >
+              <Icon name={t.icon} />
+              <span className="tool-label">{t.label}</span>
+            </button>
+          ))}
+        </div>
 
-      <div className="actions">
-        <button
-          type="button"
-          className="btn"
-          onClick={onUndo}
-          disabled={!canUndo}
-          title={`Undo${canUndo ? ' (Ctrl+Z)' : ' — nothing to undo'}`}
-        >
-          <Icon name="undo" />
-          <span className="btn-label">Undo</span>
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={onRedo}
-          disabled={!canRedo}
-          title={`Redo${canRedo ? ' (Ctrl+Shift+Z)' : ' — nothing to redo'}`}
-        >
-          <Icon name="redo" />
-          <span className="btn-label">Redo</span>
-        </button>
-        <div className="toolbar-divider" />
+        <div className="actions">
+          <button
+            type="button"
+            className="btn"
+            onClick={onUndo}
+            disabled={!canUndo}
+            title={`Undo${canUndo ? ' (Ctrl+Z)' : ' — nothing to undo'}`}
+          >
+            <Icon name="undo" />
+            <span className="btn-label">Undo</span>
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={onRedo}
+            disabled={!canRedo}
+            title={`Redo${canRedo ? ' (Ctrl+Shift+Z)' : ' — nothing to redo'}`}
+          >
+            <Icon name="redo" />
+            <span className="btn-label">Redo</span>
+          </button>
+          <div className="toolbar-divider" />
         <button
           type="button"
           className="btn"
@@ -190,9 +221,10 @@ export function Toolbar({
         <div className="board-menu">
           {exportOpen && <div className="menu-backdrop" onClick={() => setExportOpen(false)} />}
           <button
+            ref={exportBtnRef}
             type="button"
             className="btn"
-            onClick={() => setExportOpen((o) => !o)}
+            onClick={toggleExportMenu}
             title="Export the board as PNG or PDF"
             aria-expanded={exportOpen}
           >
@@ -200,7 +232,7 @@ export function Toolbar({
             <span className="btn-label">Export</span>
           </button>
           {exportOpen && (
-            <div className="board-menu-drop">
+            <div className="board-menu-drop" style={menuPos ?? undefined}>
               <button type="button" className="menu-item" onClick={onExport}>
                 <Icon name="export" />
                 <span>PNG image</span>
@@ -239,9 +271,10 @@ export function Toolbar({
         <div className="board-menu">
           {menuOpen && <div className="menu-backdrop" onClick={() => setMenuOpen(false)} />}
           <button
+            ref={boardBtnRef}
             type="button"
             className="btn"
-            onClick={() => setMenuOpen((o) => !o)}
+            onClick={toggleBoardMenu}
             title="Board options — units, grid, snap, rulers"
             aria-expanded={menuOpen}
           >
@@ -249,7 +282,7 @@ export function Toolbar({
             <span className="btn-label">Board</span>
           </button>
           {menuOpen && (
-            <div className="board-menu-drop">
+            <div className="board-menu-drop" style={menuPos ?? undefined}>
               <label className="field">
                 <span>Units</span>
                 <select
@@ -263,6 +296,21 @@ export function Toolbar({
                   <option value="m">Metres</option>
                   <option value="in">Inches</option>
                 </select>
+              </label>
+              <label className="field">
+                <span>Theme</span>
+                <div className="seg">
+                  {THEMES.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={theme === t ? 'seg-btn active' : 'seg-btn'}
+                      onClick={() => onTheme(t)}
+                    >
+                      {t === 'grey' ? 'Grey' : t[0].toUpperCase() + t.slice(1)}
+                    </button>
+                  ))}
+                </div>
               </label>
               <label className="field check">
                 <input type="checkbox" checked={gridVisible} onChange={(e) => onGridVisible(e.target.checked)} />
@@ -329,6 +377,7 @@ export function Toolbar({
           <Icon name="clear" />
           <span className="btn-label">Clear</span>
         </button>
+        </div>
       </div>
     </header>
   );

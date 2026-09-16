@@ -1,7 +1,20 @@
-import type { Anchor, Dimension, Material, Note, Part, PartShape, Vec2 } from '../domain/types';
-import { formatLength, mmToDisplay } from '../domain/format';
+import type { Anchor, Dimension, LinearAxis, Material, MeasureMode, Note, Part, PartShape, Vec2 } from '../domain/types';
+import { formatAngle, formatArea, formatLength, mmToDisplay } from '../domain/format';
 import type { Scene } from './scene';
-import { dist, partContains, pointSegmentDistance, snap } from './geometry';
+import {
+  angleBetween,
+  dist,
+  partCenter,
+  partContains,
+  pointSegmentDistance,
+  polygonArea,
+  polygonPerimeter,
+  rot,
+  rotatedPoint,
+  snap,
+  toLocalFrame,
+  worldAABB,
+} from './geometry';
 import { bytesToBase64, buildPdf } from './pdf';
 
 export type Tool = 'select' | 'part' | 'dimension' | 'pan' | 'custom' | 'note';
@@ -25,11 +38,19 @@ interface EngineOptions {
 type Mode =
   | { kind: 'idle' }
   | { kind: 'pan'; startScreen: Vec2; startCam: Vec2 }
-  | { kind: 'move'; partId: string; grab: Vec2 }
+  | { kind: 'move'; grabs: { id: string; start: Vec2 }[]; grab: Vec2 }
   | { kind: 'move-note'; noteId: string; grab: Vec2 }
   | { kind: 'resize'; partId: string }
+  | { kind: 'rotate'; partId: string; angle0: number; rot0: number }
   | { kind: 'draw'; start: Vec2; current: Vec2; shape: PartShape }
-  | { kind: 'dim'; first: Anchor; hover: Vec2 };
+  | { kind: 'dim'; first: Anchor; hover: Vec2 }
+  | { kind: 'dim-angle'; a: Anchor; b: Anchor | null; hover: Vec2 }
+  | { kind: 'dim-radius'; center: Anchor; hover: Vec2 }
+  | { kind: 'dim-area'; points: Anchor[]; hover: Vec2 }
+  | { kind: 'quick'; start: Vec2; current: Vec2 }
+  | { kind: 'marquee'; startScreen: Vec2; currentScreen: Vec2; additive: boolean }
+  | { kind: 'dim-offset'; dimId: string; startWorld: Vec2 }
+  | { kind: 'pinch'; dist0: number; scale0: number; mid0: Vec2; cam0: Vec2 };
 
 const HANDLE = 10;
 const MAX_SCALE = 4;
@@ -82,6 +103,7 @@ export class CanvasEngine {
   private verticalLinesVisible = true;
   private horizontalLinesVisible = true;
   private gridOpacity = 100;
+  private pointers = new Map<number, Vec2>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -127,6 +149,24 @@ export class CanvasEngine {
     this.mode = { kind: 'idle' };
     this.canvas.style.cursor =
       tool === 'pan' ? 'grab' : tool === 'select' || tool === 'custom' ? 'default' : 'crosshair';
+    this.dirty = true;
+  }
+
+  private measureMode: MeasureMode = 'linear';
+  private quick = false;
+
+  setMeasureMode(mode: MeasureMode): void {
+    this.measureMode = mode;
+    this.dirty = true;
+  }
+
+  getMeasureMode(): MeasureMode {
+    return this.measureMode;
+  }
+
+  setQuickMeasure(on: boolean): void {
+    this.quick = on;
+    if (!on && this.mode.kind === 'quick') this.mode = { kind: 'idle' };
     this.dirty = true;
   }
 
@@ -180,18 +220,21 @@ export class CanvasEngine {
   }
 
   fit(): void {
-    if (this.scene.parts.length === 0 && this.scene.notes.length === 0) return;
+    const parts = this.scene.visibleParts();
+    if (parts.length === 0 && this.scene.notes.length === 0) return;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const p of this.scene.parts) {
-      minX = Math.min(minX, p.position.x);
-      minY = Math.min(minY, p.position.y);
-      maxX = Math.max(maxX, p.position.x + p.size.x);
-      maxY = Math.max(maxY, p.position.y + p.size.y);
+    for (const p of parts) {
+      const a = worldAABB(p);
+      minX = Math.min(minX, a.minX);
+      minY = Math.min(minY, a.minY);
+      maxX = Math.max(maxX, a.maxX);
+      maxY = Math.max(maxY, a.maxY);
     }
     for (const n of this.scene.notes) {
+      if (!this.scene.isNoteVisible(n)) continue;
       const a = this.scene.noteAnchorWorld(n);
       if (!a) continue;
       minX = Math.min(minX, a.x);
@@ -212,6 +255,20 @@ export class CanvasEngine {
 
   home(): void {
     this.cam = { x: -120, y: -80, scale: 0.32 };
+    this.dirty = true;
+  }
+
+  focusPart(id: string): void {
+    const p = this.scene.partById(id);
+    if (!p) return;
+    const a = worldAABB(p);
+    const cx = (a.minX + a.maxX) / 2;
+    const cy = (a.minY + a.maxY) / 2;
+    const size = Math.max(a.maxX - a.minX, a.maxY - a.minY, 1);
+    const ideal = Math.min(MAX_SCALE, Math.max(MIN_SCALE, 300 / size));
+    this.cam.scale = Math.max(this.cam.scale, ideal);
+    this.cam.x = cx - this.width / 2 / this.cam.scale;
+    this.cam.y = cy - this.height / 2 / this.cam.scale;
     this.dirty = true;
   }
 
@@ -273,10 +330,12 @@ export class CanvasEngine {
       }
     }
 
-    for (const part of this.scene.parts) this.svgPart(push, part);
-    for (const dim of this.scene.dimensions) this.svgDimension(push, dim, trim);
+    for (const part of this.scene.visibleParts()) this.svgPart(push, part);
+    for (const dim of this.scene.dimensions) {
+      if (this.scene.isDimensionVisible(dim)) this.svgDimension(push, dim, trim);
+    }
     for (const note of this.scene.notes) {
-      if (this.scene.isBoardNote(note)) this.svgNote(push, note, trim);
+      if (this.scene.isNoteVisible(note)) this.svgNote(push, note, trim);
     }
 
     push('</svg>');
@@ -292,12 +351,16 @@ export class CanvasEngine {
     const wpx = svgNum(w);
     const hpx = svgNum(h);
     const mat = this.scene.material(part.materialId);
-    const selected = part.id === this.scene.selectedPartId;
+    const selected = this.scene.isPartSelected(part.id);
     const fill = part.color ?? mat?.color ?? '#cfcfcf';
     const stroke = selected ? '#2f6df6' : 'rgba(60,50,35,0.55)';
     const sw = selected ? 2 : 1;
     const shape = part.shape ?? 'rect';
     const label = part.quantity > 1 ? `${part.label} x${part.quantity}` : part.label;
+    const rotDeg = (rot(part) * 180) / Math.PI;
+    if (rotDeg) {
+      push(`<g transform="rotate(${svgNum(rotDeg)} ${svgNum(s.x + w / 2)} ${svgNum(s.y + h / 2)}">`);
+    }
     if (shape === 'line') {
       push(
         `<line x1="${svgNum(s.x + h / 2)}" y1="${svgNum(s.y + h / 2)}" x2="${svgNum(s.x + w - h / 2)}" y2="${svgNum(s.y + h / 2)}" stroke="${fill}" stroke-width="${Math.max(2, h)}" stroke-linecap="round" opacity="0.92"/>`,
@@ -305,9 +368,7 @@ export class CanvasEngine {
       push(
         `<line x1="${svgNum(s.x + h / 2)}" y1="${svgNum(s.y + h / 2)}" x2="${svgNum(s.x + w - h / 2)}" y2="${svgNum(s.y + h / 2)}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round"/>`,
       );
-      return;
-    }
-    if (shape === 'circle') {
+    } else if (shape === 'circle') {
       push(
         `<ellipse cx="${svgNum(s.x + w / 2)}" cy="${svgNum(s.y + h / 2)}" rx="${svgNum(w / 2)}" ry="${svgNum(h / 2)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" opacity="0.92"/>`,
       );
@@ -323,22 +384,102 @@ export class CanvasEngine {
         `<text x="${svgNum(s.x + w / 2)}" y="${svgNum(s.y + h / 2)}" font-size="11" fill="rgba(35,28,18,0.85)" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`,
       );
     }
+    if (rotDeg) push('</g>');
   }
 
   private svgDimension(push: (line: string) => void, dim: Dimension, trim: (t: string, w: number) => string): void {
+    const rgb = hexToRgb(this.canvasColor);
+    const dark = rgb.r * 0.299 + rgb.g * 0.587 + rgb.b * 0.114 < 128;
+    const color = this.scene.selectedDimensionIds.includes(dim.id) ? '#2f6df6' : '#b0442f';
+    const fill = dark ? '#e0d9c8' : '#8a5a33';
+    this.ctx.font = '11px system-ui, sans-serif';
+
+    if (dim.kind === 'angle') {
+      const a = this.scene.anchorPoint(dim.a);
+      const b = this.scene.anchorPoint(dim.b!);
+      const c = this.scene.anchorPoint(dim.c!);
+      const A = this.toScreen(a);
+      const B = this.toScreen(b);
+      const C = this.toScreen(c);
+      const arcR = Math.max(16, dim.offset);
+      const ang1 = Math.atan2(B.y - A.y, B.x - A.x);
+      const ang2 = Math.atan2(C.y - A.y, C.x - A.x);
+      let d = (ang2 - ang1) % (2 * Math.PI);
+      if (d < 0) d += 2 * Math.PI;
+      push(`<path d="M${svgNum(A.x)},${svgNum(A.y)}L${svgNum(B.x)},${svgNum(B.y)}" fill="none" stroke="${color}" stroke-width="1"/>`);
+      push(`<path d="M${svgNum(A.x)},${svgNum(A.y)}L${svgNum(C.x)},${svgNum(C.y)}" fill="none" stroke="${color}" stroke-width="1"/>`);
+      push(`<path d="M${svgNum(A.x + arcR * Math.cos(ang1))},${svgNum(A.y + arcR * Math.sin(ang1))}A${arcR},${arcR} 0 ${d > Math.PI ? 1 : 0} ${d > Math.PI ? 0 : 1} ${svgNum(A.x + arcR * Math.cos(ang2))},${svgNum(A.y + arcR * Math.sin(ang2))}" fill="none" stroke="${color}" stroke-width="1"/>`);
+      const mid = (ang1 + ang2) / 2;
+      const lx = A.x + Math.cos(mid) * (arcR + 14);
+      const ly = A.y + Math.sin(mid) * (arcR + 14);
+      push(`<text x="${svgNum(lx)}" y="${svgNum(ly)}" font-size="11" fill="${fill}" text-anchor="middle" dominant-baseline="middle">${esc(trim(formatAngle(angleBetween(a, b, c), this.scene.displayPrecision), 120))}</text>`);
+      return;
+    }
+
+    if (dim.kind === 'radius') {
+      const center = this.scene.anchorPoint(dim.a);
+      const rim = this.scene.anchorPoint(dim.b);
+      const C = this.toScreen(center);
+      const R = this.toScreen(rim);
+      const value = dist(center, rim);
+      const shown = dim.radiusMode === 'diameter' ? value * 2 : value;
+      const text = dim.radiusMode === 'diameter' ? `⌀ ${formatLength(shown, this.scene.displayUnit, this.scene.displayPrecision)}` : `R ${formatLength(shown, this.scene.displayUnit, this.scene.displayPrecision)}`;
+      const mx = (C.x + R.x) / 2;
+      const my = (C.y + R.y) / 2;
+      const dx = R.x - C.x;
+      const dy = R.y - C.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const off = dim.offset * this.cam.scale;
+      push(`<path d="M${svgNum(C.x)},${svgNum(C.y)}L${svgNum(R.x)},${svgNum(R.y)}" fill="none" stroke="${color}" stroke-width="1"/>`);
+      push(`<text x="${svgNum(mx + (-dy / len) * off)}" y="${svgNum(my + (dx / len) * off)}" font-size="11" fill="${fill}" text-anchor="middle" dominant-baseline="middle">${esc(trim(text, 120))}</text>`);
+      return;
+    }
+
+    if (dim.kind === 'area' && dim.points) {
+      const world = dim.points.map((p) => this.scene.anchorPoint(p));
+      const pts = world.map((p) => this.toScreen(p));
+      const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${svgNum(p.x)},${svgNum(p.y)}`).join('') + 'Z';
+      push(`<path d="${path}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-width="1"/>`);
+      let cx = 0;
+      let cy = 0;
+      for (const p of pts) {
+        cx += p.x;
+        cy += p.y;
+      }
+      cx /= pts.length;
+      cy /= pts.length;
+      push(`<text x="${svgNum(cx)}" y="${svgNum(cy - 8)}" font-size="11" fill="${fill}" text-anchor="middle" dominant-baseline="middle">${esc(trim(formatArea(polygonArea(world), this.scene.displayUnit, this.scene.displayPrecision), 160))}</text>`);
+      push(`<text x="${svgNum(cx)}" y="${svgNum(cy + 8)}" font-size="11" fill="${fill}" text-anchor="middle" dominant-baseline="middle">${esc(trim(`P ${formatLength(polygonPerimeter(world), this.scene.displayUnit, this.scene.displayPrecision)}`, 160))}</text>`);
+      return;
+    }
+
     const a = this.scene.anchorPoint(dim.a);
     const b = this.scene.anchorPoint(dim.b);
     const A = this.toScreen(a);
     const B = this.toScreen(b);
-    const rgb = hexToRgb(this.canvasColor);
-    const dark = rgb.r * 0.299 + rgb.g * 0.587 + rgb.b * 0.114 < 128;
     const off = dim.offset * this.cam.scale;
-    const color = dim.id === this.scene.selectedDimensionId ? '#2f6df6' : '#b0442f';
-    const value = formatLength(dim.axis === 'x' ? Math.abs(b.x - a.x) : Math.abs(b.y - a.y), this.scene.displayUnit, this.scene.displayPrecision);
-    const label = trim(value, 120);
-    this.ctx.font = '11px system-ui, sans-serif';
+    const value =
+      dim.axis === 'free'
+        ? dist(a, b)
+        : dim.axis === 'x'
+          ? Math.abs(b.x - a.x)
+          : Math.abs(b.y - a.y);
+    const label = trim(this.dimLabel(value, dim.target ?? null), 120);
     const lw = Math.floor(this.ctx.measureText(label).width) + 6;
-    if (dim.axis === 'x') {
+    if (dim.axis === 'free') {
+      const mx = (A.x + B.x) / 2;
+      const my = (A.y + B.y) / 2;
+      const dx = B.x - A.x;
+      const dy = B.y - A.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const lx = mx + (-dy / len) * off;
+      const ly = my + (dx / len) * off;
+      push(`<path d="M${svgNum(A.x)},${svgNum(A.y)}L${svgNum(B.x)},${svgNum(B.y)}" fill="none" stroke="${color}" stroke-width="1"/>`);
+      this.svgEndArrow(push, A.x, A.y, B.x, B.y, color);
+      this.svgEndArrow(push, B.x, B.y, A.x, A.y, color);
+      push(`<rect x="${svgNum(lx - lw / 2)}" y="${svgNum(ly - 8)}" width="${lw}" height="16" fill="${this.canvasColor}"/>`);
+      push(`<text x="${svgNum(lx)}" y="${svgNum(ly)}" font-size="11" fill="${fill}" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`);
+    } else if (dim.axis === 'x') {
       const y = svgNum(Math.max(A.y, B.y) + off);
       push(`<path d="M${svgNum(A.x)},${svgNum(A.y)}V${y}M${svgNum(B.x)},${svgNum(B.y)}V${y}M${svgNum(A.x)},${y}H${svgNum(B.x)}" fill="none" stroke="${color}" stroke-width="1"/>`);
       this.svgArrow(push, A.x, A.y + off, A.x < B.x ? 1 : -1, 'x', color);
@@ -346,7 +487,7 @@ export class CanvasEngine {
       const cx = svgNum((A.x + B.x) / 2);
       const cy = svgNum(Math.max(A.y, B.y) + off - 12);
       push(`<rect x="${svgNum((A.x + B.x) / 2 - lw / 2)}" y="${svgNum(Math.max(A.y, B.y) + off - 21)}" width="${lw}" height="16" fill="${this.canvasColor}"/>`);
-      push(`<text x="${cx}" y="${cy}" font-size="11" fill="${dark ? '#e0d9c8' : '#8a5a33'}" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`);
+      push(`<text x="${cx}" y="${cy}" font-size="11" fill="${fill}" text-anchor="middle" dominant-baseline="middle">${esc(label)}</text>`);
     } else {
       const x = svgNum(Math.max(A.x, B.x) + off);
       push(`<path d="M${svgNum(A.x)},${svgNum(A.y)}H${x}M${svgNum(B.x)},${svgNum(B.y)}H${x}M${x},${svgNum(A.y)}V${svgNum(B.y)}" fill="none" stroke="${color}" stroke-width="1"/>`);
@@ -354,8 +495,27 @@ export class CanvasEngine {
       this.svgArrow(push, B.x + off, B.y, A.y < B.y ? -1 : 1, 'y', color);
       const lx = svgNum(Math.max(A.x, B.x) + off + 8);
       const cy = svgNum((A.y + B.y) / 2);
-      push(`<text x="${lx}" y="${cy}" font-size="11" fill="${dark ? '#e0d9c8' : '#8a5a33'}" text-anchor="start" dominant-baseline="middle">${esc(label)}</text>`);
+      push(`<text x="${lx}" y="${cy}" font-size="11" fill="${fill}" text-anchor="start" dominant-baseline="middle">${esc(label)}</text>`);
     }
+  }
+
+  private svgEndArrow(
+    push: (line: string) => void,
+    tx: number,
+    ty: number,
+    fx: number,
+    fy: number,
+    color: string,
+  ): void {
+    const dx = tx - fx;
+    const dy = ty - fy;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const s = 6;
+    push(
+      `<polygon points="${svgNum(tx)},${svgNum(ty)} ${svgNum(tx - ux * s - uy * s * 0.5)},${svgNum(ty - uy * s + ux * s * 0.5)} ${svgNum(tx - ux * s + uy * s * 0.5)},${svgNum(ty - uy * s - ux * s * 0.5)}" fill="${color}"/>`,
+    );
   }
 
   private svgArrow(
@@ -386,6 +546,17 @@ export class CanvasEngine {
         : (() => {
             const d = this.scene.dimensions.find((dm) => dm.id === note.context.dimensionId);
             if (!d) return anchor;
+            if (d.kind === 'angle') return this.toScreen(this.scene.anchorPoint(d.a));
+            if (d.kind === 'area' && d.points) {
+              let cx = 0;
+              let cy = 0;
+              for (const p of d.points) {
+                const w = this.scene.anchorPoint(p);
+                cx += w.x;
+                cy += w.y;
+              }
+              return this.toScreen({ x: cx / d.points.length, y: cy / d.points.length });
+            }
             const a = this.scene.anchorPoint(d.a);
             const b = this.scene.anchorPoint(d.b);
             return this.toScreen({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -461,6 +632,53 @@ export class CanvasEngine {
     return { x: this.snapAxis(w.x), y: this.snapAxis(w.y) };
   }
 
+  private edgeSnap(
+    size: Vec2,
+    start: Vec2,
+    off: Vec2,
+    others: { minX: number; minY: number; maxX: number; maxY: number }[],
+    thresh: number,
+  ): Vec2 {
+    const out = { x: off.x, y: off.y };
+    let bx: number | null = null;
+    let bdx = thresh;
+    let by: number | null = null;
+    let bdy = thresh;
+    for (const o of others) {
+      const lx = start.x + off.x;
+      const rx = lx + size.x;
+      const ty = start.y + off.y;
+      const byY = ty + size.y;
+      for (const line of [o.minX, o.maxX] as const) {
+        const dl = Math.abs(lx - line);
+        const dr = Math.abs(rx - line);
+        if (dl < bdx) {
+          bdx = dl;
+          bx = line;
+        }
+        if (dr < bdx) {
+          bdx = dr;
+          bx = line - size.x;
+        }
+      }
+      for (const line of [o.minY, o.maxY] as const) {
+        const dt = Math.abs(ty - line);
+        const db = Math.abs(byY - line);
+        if (dt < bdy) {
+          bdy = dt;
+          by = line;
+        }
+        if (db < bdy) {
+          bdy = db;
+          by = line - size.y;
+        }
+      }
+    }
+    if (bx !== null && bdx <= thresh) out.x = bx - start.x;
+    if (by !== null && bdy <= thresh) out.y = by - start.y;
+    return out;
+  }
+
   private loop = (): void => {
     if (this.dirty) {
       this.dirty = false;
@@ -478,29 +696,84 @@ export class CanvasEngine {
     const s = this.screen(e);
     const w = this.toWorld(s);
 
+    this.pointers.set(e.pointerId, s);
+    if (this.pointers.size > 1) {
+      if (this.mode.kind !== 'pinch') {
+        this.scene.end();
+        const pts = [...this.pointers.values()];
+        this.mode = {
+          kind: 'pinch',
+          dist0: Math.max(1, Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)),
+          scale0: this.cam.scale,
+          mid0: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 },
+          cam0: { ...this.cam },
+        };
+      }
+      this.dirty = true;
+      return;
+    }
+
     if (e.button === 1 || this.space || this.tool === 'pan') {
       this.mode = { kind: 'pan', startScreen: s, startCam: { x: this.cam.x, y: this.cam.y } };
       return;
     }
     if (e.button !== 0) return;
 
+    if (this.quick && (this.tool === 'select' || this.tool === 'dimension') && !this.hitPart(w) && !this.hitDimension(s) && !this.hitNote(s)) {
+      this.mode = { kind: 'quick', start: w, current: w };
+      this.dirty = true;
+      return;
+    }
+
     if (this.tool === 'select') {
-      const sel = this.scene.selectedPart();
-      if (sel && this.hitHandle(s, sel)) {
-        this.scene.begin();
-        this.mode = { kind: 'resize', partId: sel.id };
-        return;
+      const selection = this.scene.selectedParts();
+      const primary = this.scene.selectedPart();
+      if (selection.length === 1 && primary) {
+        if (this.hitRotateHandle(s, primary)) {
+          const c = partCenter(primary);
+          const w0 = this.toWorld(s);
+          this.scene.begin();
+          this.mode = {
+            kind: 'rotate',
+            partId: primary.id,
+            angle0: Math.atan2(w0.y - c.y, w0.x - c.x),
+            rot0: rot(primary),
+          };
+          return;
+        }
+        if (this.hitHandle(s, primary)) {
+          this.scene.begin();
+          this.mode = { kind: 'resize', partId: primary.id };
+          return;
+        }
       }
       const part = this.hitPart(w);
       if (part) {
+        if (e.shiftKey) {
+          this.scene.togglePartSelected(part.id);
+          this.dirty = true;
+          return;
+        }
+        if (this.scene.isPartSelected(part.id) && selection.length > 1) {
+          this.scene.begin();
+          this.mode = {
+            kind: 'move',
+            grabs: selection.map((p) => ({ id: p.id, start: { x: p.position.x, y: p.position.y } })),
+            grab: { x: w.x - part.position.x, y: w.y - part.position.y },
+          };
+          return;
+        }
         this.scene.selectPart(part.id);
         this.scene.begin();
-        this.mode = { kind: 'move', partId: part.id, grab: { x: w.x - part.position.x, y: w.y - part.position.y } };
+        this.mode = { kind: 'move', grabs: [{ id: part.id, start: part.position }], grab: { x: w.x - part.position.x, y: w.y - part.position.y } };
         return;
       }
       const dim = this.hitDimension(s);
       if (dim) {
-        this.scene.selectDimension(dim.id);
+        if (e.shiftKey) this.scene.toggleDimensionSelected(dim.id);
+        else this.scene.selectDimension(dim.id);
+        this.scene.begin();
+        this.mode = { kind: 'dim-offset', dimId: dim.id, startWorld: w };
         return;
       }
       const note = this.hitNote(s);
@@ -517,7 +790,8 @@ export class CanvasEngine {
         }
         return;
       }
-      this.scene.selectPart(null);
+      this.mode = { kind: 'marquee', startScreen: s, currentScreen: s, additive: e.shiftKey };
+      this.dirty = true;
       return;
     }
 
@@ -560,27 +834,111 @@ export class CanvasEngine {
     }
 
     if (this.tool === 'dimension') {
-      const tolerance = 12 / this.cam.scale;
-      const anchor = this.scene.resolveAnchor(w, tolerance);
-      if (this.mode.kind === 'dim') {
-        const a = this.scene.anchorPoint(this.mode.first);
-        const b = this.scene.anchorPoint(anchor);
-        const dx = Math.abs(b.x - a.x);
-        const dy = Math.abs(b.y - a.y);
-        if (dx > 0.5 || dy > 0.5) {
-          this.scene.addDimension({ a: this.mode.first, b: anchor, offset: 60, axis: dx >= dy ? 'x' : 'y' });
+      this.onMeasureDown(w, e);
+      return;
+    }
+  };
+
+  private onMeasureDown(w: Vec2, e: PointerEvent): void {
+    const tolerance = 12 / this.cam.scale;
+    const anchor = this.scene.resolveAnchor(w, tolerance);
+
+    if (this.measureMode === 'angle') {
+      if (this.mode.kind === 'dim-angle') {
+        if (this.mode.b) {
+          const c = anchor;
+          const a = this.scene.anchorPoint(this.mode.a);
+          const b = this.scene.anchorPoint(this.mode.b);
+          const cc = this.scene.anchorPoint(c);
+          if (angleBetween(a, b, cc) > 0.01) {
+            this.scene.addDimension({ kind: 'angle', a: this.mode.a, b: this.mode.b, c, offset: 60, axis: 'free' });
+          }
+          this.mode = { kind: 'idle' };
+        } else {
+          this.mode = { kind: 'dim-angle', a: this.mode.a, b: anchor, hover: w };
+        }
+      } else {
+        this.mode = { kind: 'dim-angle', a: anchor, b: null, hover: w };
+      }
+      this.dirty = true;
+      return;
+    }
+
+    if (this.measureMode === 'radius') {
+      if (this.mode.kind === 'dim-radius') {
+        const center = this.scene.anchorPoint(this.mode.center);
+        const rim = this.scene.anchorPoint(anchor);
+        if (dist(center, rim) > 0.5) {
+          this.scene.addDimension({ kind: 'radius', a: this.mode.center, b: anchor, offset: 40, axis: 'free' });
         }
         this.mode = { kind: 'idle' };
       } else {
-        this.mode = { kind: 'dim', first: anchor, hover: w };
+        this.mode = { kind: 'dim-radius', center: anchor, hover: w };
       }
       this.dirty = true;
+      return;
     }
-  };
+
+    if (this.measureMode === 'area') {
+      if (this.mode.kind === 'dim-area') {
+        if (e.detail === 2) {
+          if (this.mode.points.length >= 3) {
+            this.scene.addDimension({
+              kind: 'area',
+              a: this.mode.points[0],
+              b: this.mode.points[this.mode.points.length - 1],
+              points: this.mode.points,
+              offset: 0,
+              axis: 'free',
+            });
+            this.mode = { kind: 'idle' };
+          }
+          this.dirty = true;
+          return;
+        }
+        const first = this.scene.anchorPoint(this.mode.points[0]);
+        const p = this.scene.anchorPoint(anchor);
+        const closeEnough = this.mode.points.length >= 3 && dist(first, p) <= 10 / this.cam.scale;
+        if (closeEnough) {
+          this.scene.addDimension({
+            kind: 'area',
+            a: this.mode.points[0],
+            b: this.mode.points[this.mode.points.length - 1],
+            points: this.mode.points,
+            offset: 0,
+            axis: 'free',
+          });
+          this.mode = { kind: 'idle' };
+        } else {
+          this.mode = { kind: 'dim-area', points: [...this.mode.points, anchor], hover: w };
+        }
+      } else {
+        this.mode = { kind: 'dim-area', points: [anchor], hover: w };
+      }
+      this.dirty = true;
+      return;
+    }
+
+    if (this.mode.kind === 'dim') {
+      const a = this.scene.anchorPoint(this.mode.first);
+      const b = this.scene.anchorPoint(anchor);
+      const dx = Math.abs(b.x - a.x);
+      const dy = Math.abs(b.y - a.y);
+      if (dx > 0.5 || dy > 0.5) {
+        const axis = this.measureMode === 'diagonal' ? 'free' : dx >= dy ? 'x' : 'y';
+        this.scene.addDimension({ kind: 'linear', a: this.mode.first, b: anchor, offset: 60, axis });
+      }
+      this.mode = { kind: 'idle' };
+    } else {
+      this.mode = { kind: 'dim', first: anchor, hover: w };
+    }
+    this.dirty = true;
+  }
 
   private onMove = (e: PointerEvent): void => {
     const s = this.screen(e);
     const w = this.toWorld(s);
+    if (this.pointers.has(e.pointerId) || e.pointerType === 'touch') this.pointers.set(e.pointerId, s);
     const unit = this.scene.displayUnit;
     this.opts.onStatus?.(
       `${Math.round(mmToDisplay(w.x, unit))} , ${Math.round(mmToDisplay(w.y, unit))} ${unit}`,
@@ -593,12 +951,56 @@ export class CanvasEngine {
         this.dirty = true;
         break;
       }
+      case 'pinch': {
+        const pts = [...this.pointers.values()];
+        if (pts.length >= 2) {
+          const dist = Math.max(1, Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y));
+          const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+          const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.mode.scale0 * (dist / this.mode.dist0)));
+          const wx = (this.mode.mid0.x - this.mode.cam0.x) / this.mode.scale0;
+          const wy = (this.mode.mid0.y - this.mode.cam0.y) / this.mode.scale0;
+          this.cam.scale = scale;
+          this.cam.x = wx - mid.x / scale;
+          this.cam.y = wy - mid.y / scale;
+          this.dirty = true;
+        }
+        break;
+      }
       case 'move': {
-        const part = this.scene.partById(this.mode.partId);
-        if (part) {
-          this.scene.updatePart(part.id, {
-            position: { x: this.snapAxis(w.x - this.mode.grab.x), y: this.snapAxis(w.y - this.mode.grab.y) },
-          });
+        const dx = w.x - this.mode.grab.x;
+        const dy = w.y - this.mode.grab.y;
+        const grabbed = this.mode.grabs[0];
+        if (grabbed) {
+          const part = this.scene.partById(grabbed.id);
+          const ox = dx - grabbed.start.x;
+          const oy = dy - grabbed.start.y;
+          let offX = ox;
+          let offY = oy;
+          if (this.snapEnabled) {
+            if (part) {
+              const others = this.scene.parts
+                .filter((p) => p.id !== grabbed.id && this.scene.isPartVisible(p.id))
+                .map(worldAABB);
+              const snapped = this.edgeSnap(part.size, grabbed.start, { x: ox, y: oy }, others, 6 / this.cam.scale);
+              offX = snapped.x;
+              offY = snapped.y;
+              if (snapped.x === ox && snapped.y === oy) {
+                offX = this.snapAxis(ox);
+                offY = this.snapAxis(oy);
+              }
+            } else {
+              offX = this.snapAxis(ox);
+              offY = this.snapAxis(oy);
+            }
+          }
+          for (const g of this.mode.grabs) {
+            const p = this.scene.partById(g.id);
+            if (p) {
+              this.scene.updatePart(g.id, {
+                position: { x: g.start.x + offX, y: g.start.y + offY },
+              });
+            }
+          }
         }
         break;
       }
@@ -614,11 +1016,23 @@ export class CanvasEngine {
       case 'resize': {
         const part = this.scene.partById(this.mode.partId);
         if (part) {
-          const nw = Math.max(1, this.snapAxis(w.x - part.position.x));
-          const nh = Math.max(1, this.snapAxis(w.y - part.position.y));
+          const lp = toLocalFrame(part, w);
+          const nw = Math.max(1, this.snapAxis(lp.x));
+          const nh = Math.max(1, this.snapAxis(lp.y));
           this.scene.updatePart(part.id, {
             size: { x: nw, y: nh },
           });
+        }
+        break;
+      }
+      case 'rotate': {
+        const part = this.scene.partById(this.mode.partId);
+        if (part) {
+          const c = partCenter(part);
+          const angle = Math.atan2(w.y - c.y, w.x - c.x);
+          let r = this.mode.rot0 + (angle - this.mode.angle0);
+          if (e.shiftKey) r = Math.round(r / (Math.PI / 12)) * (Math.PI / 12);
+          this.scene.updatePart(part.id, { rotation: r });
         }
         break;
       }
@@ -629,7 +1043,58 @@ export class CanvasEngine {
       }
       case 'dim': {
         this.mode.hover = w;
+        this.measureReadout(this.scene.anchorPoint(this.mode.first), w);
         this.dirty = true;
+        break;
+      }
+      case 'dim-angle': {
+        this.mode.hover = w;
+        const a = this.scene.anchorPoint(this.mode.a);
+        if (this.mode.b) {
+          const b = this.scene.anchorPoint(this.mode.b);
+          this.opts.onStatus?.(`angle ${formatAngle(angleBetween(a, b, w), this.scene.displayPrecision)}`);
+        } else {
+          this.opts.onStatus?.(`vertex set — click the first arm`);
+        }
+        this.dirty = true;
+        break;
+      }
+      case 'dim-radius': {
+        this.mode.hover = w;
+        const c = this.scene.anchorPoint(this.mode.center);
+        this.measureReadout(c, w);
+        this.dirty = true;
+        break;
+      }
+      case 'dim-area': {
+        this.mode.hover = w;
+        this.opts.onStatus?.(`area — ${this.mode.points.length} point(s), click first to close`);
+        this.dirty = true;
+        break;
+      }
+      case 'quick': {
+        this.mode.current = w;
+        const d = dist(this.mode.start, w);
+        const ang = Math.atan2(w.y - this.mode.start.y, w.x - this.mode.start.x);
+        this.opts.onStatus?.(
+          `${formatLength(d, unit, this.scene.displayPrecision)}  ∠ ${formatAngle(Math.abs(ang), this.scene.displayPrecision)}`,
+        );
+        this.dirty = true;
+        break;
+      }
+      case 'marquee': {
+        this.mode = { ...this.mode, currentScreen: s };
+        this.dirty = true;
+        break;
+      }
+      case 'dim-offset': {
+        const mode = this.mode;
+        const dim = this.scene.dimensions.find((d) => d.id === mode.dimId);
+        if (dim) {
+          const delta = dim.axis === 'x' ? w.y - mode.startWorld.y : w.x - mode.startWorld.x;
+          this.scene.updateDimension(dim.id, { offset: Math.round((dim.offset + delta / this.cam.scale) * 100) / 100 });
+          this.mode = { ...mode, startWorld: w };
+        }
         break;
       }
       default:
@@ -638,9 +1103,15 @@ export class CanvasEngine {
   };
 
   private onUp = (e: PointerEvent): void => {
+    this.pointers.delete(e.pointerId);
     if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
 
-    const wasDrag = this.mode.kind === 'move' || this.mode.kind === 'resize' || this.mode.kind === 'move-note';
+    const wasDrag =
+      this.mode.kind === 'move' ||
+      this.mode.kind === 'resize' ||
+      this.mode.kind === 'rotate' ||
+      this.mode.kind === 'move-note' ||
+      this.mode.kind === 'dim-offset';
 
     if (this.mode.kind === 'draw') {
       const start = this.mode.start;
@@ -701,7 +1172,35 @@ export class CanvasEngine {
       }
     }
 
-    if (this.mode.kind !== 'dim') this.mode = { kind: 'idle' };
+    if (this.mode.kind === 'marquee') {
+      const m = this.mode;
+      const dx = m.currentScreen.x - m.startScreen.x;
+      const dy = m.currentScreen.y - m.startScreen.y;
+      if (Math.hypot(dx, dy) < 3) {
+        if (!m.additive) this.scene.selectParts([]);
+      } else {
+        const minX = Math.min(m.startScreen.x, m.currentScreen.x);
+        const minY = Math.min(m.startScreen.y, m.currentScreen.y);
+        const maxX = Math.max(m.startScreen.x, m.currentScreen.x);
+        const maxY = Math.max(m.startScreen.y, m.currentScreen.y);
+        const r0 = this.toWorld({ x: minX, y: minY });
+        const r1 = this.toWorld({ x: maxX, y: maxY });
+        const hit = new Set<string>();
+        for (const part of this.scene.parts) {
+          if (!this.scene.isPartVisible(part.id)) continue;
+          const a = worldAABB(part);
+          if (a.minX <= r1.x && a.maxX >= r0.x && a.minY <= r1.y && a.maxY >= r0.y) hit.add(part.id);
+        }
+        this.scene.selectParts(m.additive ? [...new Set([...this.scene.selectedPartIds, ...hit])] : [...hit]);
+      }
+    }
+
+    const pending =
+      this.mode.kind === 'dim' ||
+      this.mode.kind === 'dim-angle' ||
+      this.mode.kind === 'dim-radius' ||
+      this.mode.kind === 'dim-area';
+    if (this.mode.kind !== 'quick' && !pending) this.mode = { kind: 'idle' };
     if (wasDrag) this.scene.end();
     this.dirty = true;
   };
@@ -739,18 +1238,88 @@ export class CanvasEngine {
       this.scene.redo();
       return;
     }
+    if (mod && key === 'c') {
+      e.preventDefault();
+      this.scene.copySelection();
+      return;
+    }
+    if (mod && key === 'v') {
+      e.preventDefault();
+      this.scene.paste();
+      this.dirty = true;
+      return;
+    }
+    if (mod && key === 'd') {
+      e.preventDefault();
+      this.scene.duplicate();
+      this.dirty = true;
+      return;
+    }
     if (e.code === 'Space') this.space = true;
+    if (key === 'q') {
+      this.setQuickMeasure(!this.quick);
+      this.opts.onStatus?.(this.quick ? 'Quick measure ON — drag to measure' : 'Quick measure OFF');
+      return;
+    }
+    if (key === 'enter' && this.mode.kind === 'dim-area' && this.mode.points.length >= 3) {
+      this.scene.addDimension({
+        kind: 'area',
+        a: this.mode.points[0],
+        b: this.mode.points[this.mode.points.length - 1],
+        points: this.mode.points,
+        offset: 0,
+        axis: 'free',
+      });
+      this.mode = { kind: 'idle' };
+      this.dirty = true;
+      return;
+    }
     if (e.key === 'Escape') {
       this.mode = { kind: 'idle' };
       this.scene.end();
-      this.scene.selectPart(null);
+      this.scene.selectParts([]);
       this.scene.selectDimension(null);
       this.scene.selectNote(null);
       this.dirty = true;
     }
+    if (key === 'arrowup' || key === 'arrowdown' || key === 'arrowleft' || key === 'arrowright') {
+      e.preventDefault();
+      const step = (e.shiftKey ? 10 : 1) * (this.snapEnabled ? this.scene.profile.gridSize : 1);
+      const dx = key === 'arrowleft' ? -step : key === 'arrowright' ? step : 0;
+      const dy = key === 'arrowup' ? -step : key === 'arrowdown' ? step : 0;
+      const ids = this.scene.selectedPartIds;
+      if (ids.length) {
+        this.scene.begin();
+        for (const id of ids) {
+          const p = this.scene.partById(id);
+          if (p) this.scene.updatePart(id, { position: { x: p.position.x + dx, y: p.position.y + dy } });
+        }
+        this.scene.end();
+        this.dirty = true;
+      } else if (this.scene.selectedDimensionId) {
+        const dim = this.scene.dimensions.find((d) => d.id === this.scene.selectedDimensionId);
+        if (dim && dim.kind === 'linear') {
+          this.scene.begin();
+          const delta = dim.axis === 'x' ? dy : dim.axis === 'y' ? dx : (dx + dy) / 2;
+          this.scene.updateDimension(dim.id, { offset: dim.offset + delta });
+          this.scene.end();
+          this.dirty = true;
+        }
+      } else if (this.scene.selectedNoteId) {
+        const note = this.scene.noteById(this.scene.selectedNoteId);
+        if (note && note.context.kind === 'general' && note.board) {
+          const pos = note.position ?? { x: 0, y: 0 };
+          this.scene.begin();
+          this.scene.updateNote(note.id, { position: { x: pos.x + dx, y: pos.y + dy } });
+          this.scene.end();
+          this.dirty = true;
+        }
+      }
+    }
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (this.scene.selectedPartId) this.scene.removePart(this.scene.selectedPartId);
-      else if (this.scene.selectedDimensionId) this.scene.removeDimension(this.scene.selectedDimensionId);
+      if (this.scene.selectedPartIds.length > 0) {
+        for (const id of [...this.scene.selectedPartIds]) this.scene.removePart(id);
+      } else if (this.scene.selectedDimensionId) this.scene.removeDimension(this.scene.selectedDimensionId);
       else if (this.scene.selectedNoteId) this.scene.removeNote(this.scene.selectedNoteId);
     }
   };
@@ -761,22 +1330,82 @@ export class CanvasEngine {
 
   private hitPart(w: Vec2): Part | undefined {
     for (let i = this.scene.parts.length - 1; i >= 0; i--) {
-      if (partContains(w, this.scene.parts[i])) return this.scene.parts[i];
+      const p = this.scene.parts[i];
+      if (!this.scene.isPartVisible(p.id)) continue;
+      if (partContains(w, p)) return p;
     }
     return undefined;
   }
 
   private hitHandle(s: Vec2, part: Part): boolean {
-    const br = this.toScreen({ x: part.position.x + part.size.x, y: part.position.y + part.size.y });
-    return Math.abs(s.x - br.x) <= HANDLE && Math.abs(s.y - br.y) <= HANDLE;
+    const corner = this.toScreen(rotatedPoint(part, { x: part.size.x, y: part.size.y }));
+    return Math.abs(s.x - corner.x) <= HANDLE && Math.abs(s.y - corner.y) <= HANDLE;
+  }
+
+  private rotateHandleScreen(part: Part): Vec2 {
+    const a = worldAABB(part);
+    return this.toScreen({ x: (a.minX + a.maxX) / 2, y: a.minY - 22 / this.cam.scale });
+  }
+
+  private hitRotateHandle(s: Vec2, part: Part): boolean {
+    const h = this.rotateHandleScreen(part);
+    return Math.abs(s.x - h.x) <= HANDLE && Math.abs(s.y - h.y) <= HANDLE;
   }
 
   private hitDimension(s: Vec2): Dimension | undefined {
     for (const dim of this.scene.dimensions) {
-      const line = this.dimLineScreen(dim);
-      if (pointSegmentDistance(s, line.p1, line.p2) <= 8) return dim;
+      for (const seg of this.dimSegments(dim)) {
+        if (pointSegmentDistance(s, seg.p1, seg.p2) <= 8) return dim;
+      }
     }
     return undefined;
+  }
+
+  private dimSegments(dim: Dimension): { p1: Vec2; p2: Vec2 }[] {
+    const color = dim.id === this.scene.selectedDimensionId ? '#2f6df6' : '#b0442f';
+    void color;
+    if (dim.kind === 'angle') {
+      const a = this.toScreen(this.scene.anchorPoint(dim.a));
+      const b = this.toScreen(this.scene.anchorPoint(dim.b!));
+      const c = this.toScreen(this.scene.anchorPoint(dim.c!));
+      return [
+        { p1: a, p2: b },
+        { p1: a, p2: c },
+      ];
+    }
+    if (dim.kind === 'radius') {
+      const a = this.toScreen(this.scene.anchorPoint(dim.a));
+      const b = this.toScreen(this.scene.anchorPoint(dim.b));
+      return [{ p1: a, p2: b }];
+    }
+    if (dim.kind === 'area' && dim.points) {
+      const pts = dim.points.map((p) => this.toScreen(this.scene.anchorPoint(p)));
+      const segs: { p1: Vec2; p2: Vec2 }[] = [];
+      for (let i = 0; i < pts.length; i++) segs.push({ p1: pts[i], p2: pts[(i + 1) % pts.length] });
+      return segs;
+    }
+    const a = this.toScreen(this.scene.anchorPoint(dim.a));
+    const b = this.toScreen(this.scene.anchorPoint(dim.b));
+    const off = dim.offset * this.cam.scale;
+    if (dim.axis === 'x') {
+      const y = Math.max(a.y, b.y) + off;
+      return [{ p1: { x: a.x, y }, p2: { x: b.x, y } }];
+    }
+    if (dim.axis === 'y') {
+      const x = Math.max(a.x, b.x) + off;
+      return [{ p1: { x, y: a.y }, p2: { x, y: b.y } }];
+    }
+    return [{ p1: a, p2: b }];
+  }
+
+  private measureReadout(a: Vec2, b: Vec2): void {
+    const unit = this.scene.displayUnit;
+    const dx = Math.abs(b.x - a.x);
+    const dy = Math.abs(b.y - a.y);
+    const d = Math.hypot(dx, dy);
+    this.opts.onStatus?.(
+      `${formatLength(d, unit, this.scene.displayPrecision)}  (dx ${formatLength(dx, unit, this.scene.displayPrecision)}, dy ${formatLength(dy, unit, this.scene.displayPrecision)})`,
+    );
   }
 
   private hitNote(s: Vec2): Note | undefined {
@@ -789,33 +1418,34 @@ export class CanvasEngine {
     return undefined;
   }
 
-  private dimLineScreen(dim: Dimension): { p1: Vec2; p2: Vec2 } {
-    const a = this.toScreen(this.scene.anchorPoint(dim.a));
-    const b = this.toScreen(this.scene.anchorPoint(dim.b));
-    const off = dim.offset * this.cam.scale;
-    if (dim.axis === 'x') {
-      const y = Math.max(a.y, b.y) + off;
-      return { p1: { x: a.x, y }, p2: { x: b.x, y } };
-    }
-    const x = Math.max(a.x, b.x) + off;
-    return { p1: { x, y: a.y }, p2: { x, y: b.y } };
-  }
-
   private render(): void {
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = this.canvasColor;
     ctx.fillRect(0, 0, this.width, this.height);
     if (this.gridVisible) this.drawGrid(ctx);
-    for (const part of this.scene.parts) this.drawPart(ctx, part);
-    for (const dim of this.scene.dimensions) this.drawDimension(ctx, dim);
+    for (const part of this.scene.visibleParts()) this.drawPart(ctx, part);
+    for (const dim of this.scene.dimensions) {
+      if (this.scene.isDimensionVisible(dim)) this.drawDimension(ctx, dim);
+    }
     for (const note of this.scene.notes) {
-      if (this.scene.isBoardNote(note)) this.drawNote(ctx, note);
+      if (this.scene.isNoteVisible(note)) this.drawNote(ctx, note);
     }
     if (this.mode.kind === 'draw') this.drawPendingPart(ctx, this.mode);
-    if (this.mode.kind === 'dim') this.drawPendingDim(ctx, this.mode);
-    const selected = this.scene.selectedPart();
-    if (selected) this.drawHandles(ctx, selected);
+    if (
+      this.mode.kind === 'dim' ||
+      this.mode.kind === 'dim-angle' ||
+      this.mode.kind === 'dim-radius' ||
+      this.mode.kind === 'dim-area' ||
+      this.mode.kind === 'quick'
+    ) {
+      this.drawPendingDim(ctx, this.mode);
+    }
+    if (this.mode.kind === 'marquee') this.drawMarquee(ctx, this.mode);
+    if (this.scene.selectedPartIds.length === 1) {
+      const selected = this.scene.selectedPart();
+      if (selected) this.drawHandles(ctx, selected);
+    }
     if (this.rulersVisible) this.drawRulers(ctx);
   }
 
@@ -930,31 +1560,39 @@ export class CanvasEngine {
     const w = part.size.x * this.cam.scale;
     const h = part.size.y * this.cam.scale;
     const mat = this.scene.material(part.materialId);
-    const selected = part.id === this.scene.selectedPartId;
+    const selected = this.scene.isPartSelected(part.id);
     const fill = part.color ?? mat?.color ?? '#cfcfcf';
     const stroke = selected ? '#2f6df6' : 'rgba(60,50,35,0.55)';
     const shape = part.shape ?? 'rect';
+    const angle = rot(part);
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    if (angle) {
+      ctx.translate(w / 2, h / 2);
+      ctx.rotate(angle);
+      ctx.translate(-w / 2, -h / 2);
+    }
     ctx.globalAlpha = selected ? 1 : 0.92;
     if (shape === 'line') {
       ctx.strokeStyle = fill;
       ctx.lineCap = 'round';
       ctx.lineWidth = Math.max(2, h);
       ctx.beginPath();
-      ctx.moveTo(s.x + h / 2, s.y + h / 2);
-      ctx.lineTo(s.x + w - h / 2, s.y + h / 2);
+      ctx.moveTo(h / 2, h / 2);
+      ctx.lineTo(w - h / 2, h / 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
       ctx.strokeStyle = stroke;
       ctx.lineWidth = selected ? 2 : 1;
       ctx.stroke();
     } else {
-      this.traceShape(ctx, shape, s.x, s.y, w, h, true);
+      this.traceShape(ctx, shape, 0, 0, w, h, true);
       ctx.fillStyle = fill;
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.lineWidth = selected ? 2 : 1;
       ctx.strokeStyle = stroke;
-      this.traceShape(ctx, shape, s.x, s.y, w, h, false);
+      this.traceShape(ctx, shape, 0, 0, w, h, false);
       ctx.stroke();
     }
     if (w > 46 && h > 15) {
@@ -963,8 +1601,9 @@ export class CanvasEngine {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const label = part.quantity > 1 ? `${part.label} x${part.quantity}` : part.label;
-      ctx.fillText(label, s.x + w / 2, s.y + h / 2, Math.max(10, w - 6));
+      ctx.fillText(label, w / 2, h / 2, Math.max(10, w - 6));
     }
+    ctx.restore();
   }
 
   private traceShape(
@@ -995,9 +1634,42 @@ export class CanvasEngine {
   }
 
   private drawHandles(ctx: CanvasRenderingContext2D, part: Part): void {
-    const br = this.toScreen({ x: part.position.x + part.size.x, y: part.position.y + part.size.y });
+    const corner = this.toScreen(rotatedPoint(part, { x: part.size.x, y: part.size.y }));
     ctx.fillStyle = '#2f6df6';
-    ctx.fillRect(br.x - 5, br.y - 5, 10, 10);
+    ctx.fillRect(corner.x - 5, corner.y - 5, 10, 10);
+    const a = worldAABB(part);
+    const topC = this.toScreen({ x: (a.minX + a.maxX) / 2, y: a.minY });
+    const h = this.rotateHandleScreen(part);
+    ctx.strokeStyle = '#2f6df6';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(topC.x, topC.y);
+    ctx.lineTo(h.x, h.y);
+    ctx.stroke();
+    ctx.fillStyle = '#2f6df6';
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2f6df6';
+    ctx.font = '10.5px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    const deg = Math.round((rot(part) * 180) / Math.PI);
+    ctx.fillText(`${deg}°`, h.x, h.y - 9);
+  }
+
+  private drawMarquee(ctx: CanvasRenderingContext2D, mode: Mode & { kind: 'marquee' }): void {
+    const minX = Math.min(mode.startScreen.x, mode.currentScreen.x);
+    const minY = Math.min(mode.startScreen.y, mode.currentScreen.y);
+    const w = Math.abs(mode.currentScreen.x - mode.startScreen.x);
+    const h = Math.abs(mode.currentScreen.y - mode.startScreen.y);
+    ctx.fillStyle = mode.additive ? 'rgba(47,109,246,0.05)' : 'rgba(47,109,246,0.1)';
+    ctx.strokeStyle = '#2f6df6';
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1;
+    ctx.fillRect(minX, minY, w, h);
+    ctx.strokeRect(minX, minY, w, h);
+    ctx.setLineDash([]);
   }
 
   private noteRect(note: Note): { x: number; y: number; w: number; h: number } {
@@ -1170,30 +1842,38 @@ export class CanvasEngine {
   }
 
   private drawDimension(ctx: CanvasRenderingContext2D, dim: Dimension): void {
-    const a = this.scene.anchorPoint(dim.a);
-    const b = this.scene.anchorPoint(dim.b);
-    this.drawDimGeometry(ctx, a, b, dim.axis, dim.offset, dim.id === this.scene.selectedDimensionId);
+    const highlight = this.scene.selectedDimensionIds.includes(dim.id);
+    if (dim.kind === 'angle') {
+      this.drawAngle(ctx, this.scene.anchorPoint(dim.a), this.scene.anchorPoint(dim.b!), this.scene.anchorPoint(dim.c!), dim.offset, highlight, false);
+    } else if (dim.kind === 'radius') {
+      this.drawRadius(ctx, this.scene.anchorPoint(dim.a), this.scene.anchorPoint(dim.b), dim.offset, dim.radiusMode ?? 'radius', highlight, false);
+    } else if (dim.kind === 'area' && dim.points) {
+      this.drawArea(ctx, dim.points, highlight, false);
+    } else {
+      this.drawLinear(ctx, this.scene.anchorPoint(dim.a), this.scene.anchorPoint(dim.b), dim.axis, dim.offset, highlight, false, dim.target ?? null);
+    }
   }
 
-  private drawPendingDim(ctx: CanvasRenderingContext2D, mode: Mode & { kind: 'dim' }): void {
-    const a = this.scene.anchorPoint(mode.first);
-    const b = mode.hover;
-    const dx = Math.abs(b.x - a.x);
-    const dy = Math.abs(b.y - a.y);
-    this.drawDimGeometry(ctx, a, b, dx >= dy ? 'x' : 'y', 60, false, true);
+  private dimLabel(value: number, target: number | null): string {
+    const base = formatLength(value, this.scene.displayUnit, this.scene.displayPrecision);
+    if (target == null) return base;
+    const diff = value - target;
+    const sign = diff >= 0 ? '+' : '−';
+    return `${base}  (${sign}${formatLength(Math.abs(diff), this.scene.displayUnit, this.scene.displayPrecision)})`;
   }
 
-  private drawDimGeometry(
+  private drawLinear(
     ctx: CanvasRenderingContext2D,
-    a: Vec2,
-    b: Vec2,
-    axis: 'x' | 'y',
+    aA: Vec2,
+    bB: Vec2,
+    axis: LinearAxis,
     offset: number,
     highlight: boolean,
     dashed = false,
+    target: number | null = null,
   ): void {
-    const A = this.toScreen(a);
-    const B = this.toScreen(b);
+    const A = this.toScreen(aA);
+    const B = this.toScreen(bB);
     const off = offset * this.cam.scale;
     const color = highlight ? '#2f6df6' : '#b0442f';
     ctx.strokeStyle = color;
@@ -1201,18 +1881,26 @@ export class CanvasEngine {
     ctx.lineWidth = 1;
     if (dashed) ctx.setLineDash([4, 4]);
 
-    let value: number;
-    if (axis === 'x') {
+    if (axis === 'free') {
+      const mx = (A.x + B.x) / 2;
+      const my = (A.y + B.y) / 2;
+      const dx = B.x - A.x;
+      const dy = B.y - A.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const px = -dy / len;
+      const py = dx / len;
+      this.line(ctx, A.x, A.y, B.x, B.y);
+      this.endArrow(ctx, A, B, color);
+      this.endArrow(ctx, B, A, color);
+      if (!dashed) this.label(ctx, this.dimLabel(dist(aA, bB), target), mx + px * off, my + py * off);
+    } else if (axis === 'x') {
       const y = Math.max(A.y, B.y) + off;
       this.line(ctx, A.x, A.y, A.x, y);
       this.line(ctx, B.x, B.y, B.x, y);
       this.line(ctx, A.x, y, B.x, y);
       this.arrow(ctx, A.x, y, A.x < B.x ? 1 : -1, 'x');
       this.arrow(ctx, B.x, y, A.x < B.x ? -1 : 1, 'x');
-      value = Math.abs(b.x - a.x);
-      if (!dashed) {
-        this.label(ctx, formatLength(value, this.scene.displayUnit, this.scene.displayPrecision), (A.x + B.x) / 2, y - 12);
-      }
+      if (!dashed) this.label(ctx, this.dimLabel(Math.abs(bB.x - aA.x), target), (A.x + B.x) / 2, y - 12);
     } else {
       const x = Math.max(A.x, B.x) + off;
       this.line(ctx, A.x, A.y, x, A.y);
@@ -1220,12 +1908,179 @@ export class CanvasEngine {
       this.line(ctx, x, A.y, x, B.y);
       this.arrow(ctx, x, A.y, A.y < B.y ? 1 : -1, 'y');
       this.arrow(ctx, x, B.y, A.y < B.y ? -1 : 1, 'y');
-      value = Math.abs(b.y - a.y);
-      if (!dashed) {
-        this.label(ctx, formatLength(value, this.scene.displayUnit, this.scene.displayPrecision), x + 8, (A.y + B.y) / 2, 'left');
-      }
+      if (!dashed) this.label(ctx, this.dimLabel(Math.abs(bB.y - aA.y), target), x + 8, (A.y + B.y) / 2, 'left');
     }
     ctx.setLineDash([]);
+  }
+
+  private drawAngle(
+    ctx: CanvasRenderingContext2D,
+    a: Vec2,
+    b: Vec2,
+    c: Vec2,
+    offset: number,
+    highlight: boolean,
+    dashed = false,
+  ): void {
+    const A = this.toScreen(a);
+    const B = this.toScreen(b);
+    const C = this.toScreen(c);
+    const color = highlight ? '#2f6df6' : '#b0442f';
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1;
+    if (dashed) ctx.setLineDash([4, 4]);
+    this.line(ctx, A.x, A.y, B.x, B.y);
+    this.line(ctx, A.x, A.y, C.x, C.y);
+    const arcR = Math.max(16, offset);
+    const ang1 = Math.atan2(B.y - A.y, B.x - A.x);
+    const ang2 = Math.atan2(C.y - A.y, C.x - A.x);
+    let d = (ang2 - ang1) % (2 * Math.PI);
+    if (d < 0) d += 2 * Math.PI;
+    ctx.beginPath();
+    ctx.arc(A.x, A.y, arcR, ang1, ang2, d > Math.PI);
+    ctx.stroke();
+    const mid = (ang1 + ang2) / 2;
+    this.label(ctx, formatAngle(angleBetween(a, b, c), this.scene.displayPrecision), A.x + Math.cos(mid) * (arcR + 14), A.y + Math.sin(mid) * (arcR + 14));
+    ctx.setLineDash([]);
+  }
+
+  private drawRadius(
+    ctx: CanvasRenderingContext2D,
+    center: Vec2,
+    rim: Vec2,
+    offset: number,
+    mode: 'radius' | 'diameter',
+    highlight: boolean,
+    dashed = false,
+  ): void {
+    const C = this.toScreen(center);
+    const R = this.toScreen(rim);
+    const color = highlight ? '#2f6df6' : '#b0442f';
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1;
+    if (dashed) ctx.setLineDash([4, 4]);
+    this.line(ctx, C.x, C.y, R.x, R.y);
+    ctx.beginPath();
+    ctx.arc(C.x, C.y, 3, 0, 2 * Math.PI);
+    ctx.stroke();
+    const value = dist(center, rim);
+    const shown = mode === 'diameter' ? value * 2 : value;
+    const text = mode === 'diameter' ? `⌀ ${formatLength(shown, this.scene.displayUnit, this.scene.displayPrecision)}` : `R ${formatLength(shown, this.scene.displayUnit, this.scene.displayPrecision)}`;
+    const mx = (C.x + R.x) / 2;
+    const my = (C.y + R.y) / 2;
+    const dx = R.x - C.x;
+    const dy = R.y - C.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const off = offset * this.cam.scale;
+    this.label(ctx, text, mx + (-dy / len) * off, my + (dx / len) * off);
+    ctx.setLineDash([]);
+  }
+
+  private drawArea(
+    ctx: CanvasRenderingContext2D,
+    points: Anchor[],
+    highlight: boolean,
+    dashed = false,
+  ): void {
+    const pts = points.map((p) => this.toScreen(this.scene.anchorPoint(p)));
+    if (pts.length < 2) return;
+    const color = highlight ? '#2f6df6' : '#b0442f';
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1;
+    if (dashed) ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.fill();
+    ctx.restore();
+    ctx.stroke();
+    let cx = 0;
+    let cy = 0;
+    for (const p of pts) {
+      cx += p.x;
+      cy += p.y;
+    }
+    cx /= pts.length;
+    cy /= pts.length;
+    const world = points.map((p) => this.scene.anchorPoint(p));
+    this.label(ctx, formatArea(polygonArea(world), this.scene.displayUnit, this.scene.displayPrecision), cx, cy - 8);
+    this.label(ctx, `P ${formatLength(polygonPerimeter(world), this.scene.displayUnit, this.scene.displayPrecision)}`, cx, cy + 8);
+    ctx.setLineDash([]);
+  }
+
+  private drawPendingDim(ctx: CanvasRenderingContext2D, mode: Mode): void {
+    if (mode.kind === 'dim') {
+      const a = this.scene.anchorPoint(mode.first);
+      const b = mode.hover;
+      const dx = Math.abs(b.x - a.x);
+      const dy = Math.abs(b.y - a.y);
+      const axis: LinearAxis = this.measureMode === 'diagonal' ? 'free' : dx >= dy ? 'x' : 'y';
+      this.drawLinear(ctx, a, b, axis, 60, false, true, null);
+    } else if (mode.kind === 'dim-angle') {
+      const a = this.scene.anchorPoint(mode.a);
+      const A = this.toScreen(a);
+      if (mode.b) {
+        const b = this.scene.anchorPoint(mode.b);
+        this.drawAngle(ctx, a, b, mode.hover, 60, false, true);
+      } else {
+        const H = this.toScreen(mode.hover);
+        ctx.strokeStyle = '#2f6df6';
+        ctx.setLineDash([4, 4]);
+        this.line(ctx, A.x, A.y, H.x, H.y);
+        ctx.setLineDash([]);
+      }
+    } else if (mode.kind === 'dim-radius') {
+      this.drawRadius(ctx, this.scene.anchorPoint(mode.center), mode.hover, 40, 'radius', false, true);
+    } else if (mode.kind === 'dim-area') {
+      const pts: Anchor[] = [...mode.points, { kind: 'free', p: mode.hover }];
+      this.drawArea(ctx, pts, false, true);
+    } else if (mode.kind === 'quick') {
+      const A = this.toScreen(mode.start);
+      const B = this.toScreen(mode.current);
+      const color = '#2f6df6';
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      this.line(ctx, A.x, A.y, B.x, B.y);
+      this.endArrow(ctx, A, B, color);
+      this.endArrow(ctx, B, A, color);
+      ctx.setLineDash([]);
+      const d = dist(mode.start, mode.current);
+      const ang = Math.atan2(mode.current.y - mode.start.y, mode.current.x - mode.start.x);
+      const mx = (A.x + B.x) / 2;
+      const my = (A.y + B.y) / 2;
+      this.label(
+        ctx,
+        `${formatLength(d, this.scene.displayUnit, this.scene.displayPrecision)}  ∠ ${formatAngle(Math.abs(ang), this.scene.displayPrecision)}`,
+        mx,
+        my - 14,
+        'center',
+        color,
+      );
+    }
+  }
+
+  private endArrow(ctx: CanvasRenderingContext2D, tip: Vec2, away: Vec2, color: string): void {
+    const dx = tip.x - away.x;
+    const dy = tip.y - away.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const s = 6;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(tip.x - ux * s - uy * s * 0.5, tip.y - uy * s + ux * s * 0.5);
+    ctx.lineTo(tip.x - ux * s + uy * s * 0.5, tip.y - uy * s - ux * s * 0.5);
+    ctx.closePath();
+    ctx.fill();
   }
 
   private line(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number): void {
@@ -1257,6 +2112,7 @@ export class CanvasEngine {
     x: number,
     y: number,
     align: CanvasTextAlign = 'center',
+    color?: string,
   ): void {
     ctx.font = '11px system-ui, sans-serif';
     ctx.textAlign = align;
@@ -1269,7 +2125,7 @@ export class CanvasEngine {
     const dark = rgb.r * 0.299 + rgb.g * 0.587 + rgb.b * 0.114 < 128;
     ctx.fillStyle = this.canvasColor;
     ctx.fillRect(left, y - 8, w, 16);
-    ctx.fillStyle = dark ? '#e0d9c8' : '#8a5a33';
+    ctx.fillStyle = color ?? (dark ? '#e0d9c8' : '#8a5a33');
     ctx.fillText(text, align === 'center' ? x : x + pad, y);
   }
 }

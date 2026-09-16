@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { profileById, profiles } from './domain/profiles';
-import type { PartShape, Profile, Unit } from './domain/types';
+import type { MeasureMode, PartShape, Profile, Unit } from './domain/types';
 import { Scene } from './engine/scene';
 import { autosave, loadProject, parseProject } from './engine/persistence';
 import { CanvasEngine, type CustomPartSpec, type Tool } from './engine/canvasEngine';
+import type { Theme } from './components/Toolbar';
 import { CanvasView } from './components/CanvasView';
 import { Toolbar } from './components/Toolbar';
 import { FloatingTools } from './components/FloatingTools';
@@ -11,6 +12,8 @@ import { BomPanel } from './components/BomPanel';
 import { Inspector } from './components/Inspector';
 import { TasksPanel } from './components/TasksPanel';
 import { ToolContext } from './components/ToolContext';
+import { LayersPanel } from './components/LayersPanel';
+import { Icon } from './components/Icon';
 
 function defaultCustomSpec(p: Profile): CustomPartSpec {
   return {
@@ -32,10 +35,18 @@ export default function App() {
   }, [initial]);
   const engineRef = useRef<CanvasEngine | null>(null);
   const [tool, setTool] = useState<Tool>('select');
+  const [measureMode, setMeasureModeState] = useState<MeasureMode>('linear');
+  const [quickMeasure, setQuickMeasureState] = useState(false);
   const [kindId, setKindId] = useState(scene.profile.partKinds[0]?.id ?? '');
   const [partShape, setPartShape] = useState<PartShape | null>(null);
   const [status, setStatus] = useState('');
   const [canvasColor, setCanvasColor] = useState('#f7f4ec');
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem('draw-try:theme');
+    const t: Theme = saved === 'grey' || saved === 'dark' ? saved : 'light';
+    document.documentElement.dataset.theme = t;
+    return t;
+  });
   const [customSpec, setCustomSpec] = useState<CustomPartSpec>(defaultCustomSpec(scene.profile));
   const [profileId, setProfileId] = useState(scene.profile.id);
   const [pendingProfile, setPendingProfile] = useState<Profile | null>(null);
@@ -48,10 +59,16 @@ export default function App() {
   const [gridOpacity, setGridOpacity] = useState(100);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [rulersVisible, setRulersVisible] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const version = useSyncExternalStore(scene.subscribe, () => scene.version);
 
   useEffect(() => autosave(scene), [scene]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('draw-try:theme', theme);
+  }, [theme]);
 
   const onReady = useCallback(
     (engine: CanvasEngine) => {
@@ -73,6 +90,16 @@ export default function App() {
   const handleTool = useCallback((t: Tool) => {
     setTool(t);
     engineRef.current?.setTool(t);
+  }, []);
+
+  const handleMeasureMode = useCallback((m: MeasureMode) => {
+    setMeasureModeState(m);
+    engineRef.current?.setMeasureMode(m);
+  }, []);
+
+  const handleQuickMeasure = useCallback((on: boolean) => {
+    setQuickMeasureState(on);
+    engineRef.current?.setQuickMeasure(on);
   }, []);
 
   const handleKind = useCallback((id: string) => {
@@ -261,6 +288,14 @@ export default function App() {
     engineRef.current?.home();
   }, [scene]);
 
+  const handleFocusPart = useCallback(
+    (id: string) => {
+      scene.selectPart(id);
+      engineRef.current?.focusPart(id);
+    },
+    [scene],
+  );
+
   return (
     <div className="app" style={{ '--profile': scene.profile.color } as CSSProperties}>
       <Toolbar
@@ -269,6 +304,7 @@ export default function App() {
         profileId={profileId}
         tool={tool}
         canvasColor={canvasColor}
+        theme={theme}
         displayUnit={displayUnit}
         gridVisible={gridVisible}
         verticalLines={verticalLines}
@@ -290,6 +326,7 @@ export default function App() {
         onSaveProject={handleSaveProject}
         onOpenProject={handleOpenProject}
         onCanvasColor={handleCanvasColor}
+        onTheme={setTheme}
         onUnit={handleUnit}
         onGridVisible={handleGridVisible}
         onVerticalLines={handleVerticalLines}
@@ -306,19 +343,48 @@ export default function App() {
         <div className="board-wrap">
           <CanvasView scene={scene} onReady={onReady} onStatus={setStatus} />
           <FloatingTools tool={tool} onTool={handleTool} />
+          {!sheetOpen && (
+            <button
+              type="button"
+              className="sheet-tab"
+              onClick={() => setSheetOpen(true)}
+              aria-label="Open panels"
+              title="Open panels"
+            >
+              <Icon name="board" />
+              <span>Tools &amp; lists</span>
+            </button>
+          )}
         </div>
-        <aside className="sidebar">
+        <aside className={`sidebar${sheetOpen ? ' open' : ''}`}>
+          <div className="sidebar-head">
+            <span className="sheet-grab" />
+            <button
+              type="button"
+              className="sheet-close"
+              aria-label="Close panels"
+              title="Close panels"
+              onClick={() => setSheetOpen(false)}
+            >
+              ✕
+            </button>
+          </div>
           <ToolContext
             scene={scene}
             tool={tool}
             kindId={kindId}
             partShape={partShape}
             customSpec={customSpec}
+            measureMode={measureMode}
+            quickMeasure={quickMeasure}
             onKind={handleKind}
             onPartShape={handlePartShape}
             onCustomSpec={handleCustomSpec}
+            onMeasureMode={handleMeasureMode}
+            onQuickMeasure={handleQuickMeasure}
           />
           {tool !== 'part' && tool !== 'dimension' && tool !== 'pan' && <Inspector scene={scene} version={version} />}
+          <LayersPanel scene={scene} version={version} onFocus={handleFocusPart} />
           <BomPanel scene={scene} version={version} />
           <TasksPanel scene={scene} version={version} />
         </aside>
@@ -326,7 +392,7 @@ export default function App() {
       <footer className="statusbar">
         <span className="status-text">{status || 'Ready'}</span>
         <span className="status-hint">
-          Wheel = zoom · Space/middle-drag = pan · Delete = remove · Ctrl+Z = undo · Esc = cancel
+          Wheel = zoom · Space/middle-drag = pan · Delete = remove · Ctrl+Z = undo · Q = quick measure · Esc = cancel
         </span>
       </footer>
       {savingTemplate && (

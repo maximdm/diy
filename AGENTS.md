@@ -149,8 +149,13 @@ Keep profiles as data. Do not put behaviour in them.
 
 ## Known limitations (v0.1)
 
-- No rotation support in rendering/hit-testing (`rotation` exists but is unused);
-  non-rotated `rect | circle | triangle | line` shapes are supported.
+- Rotation is supported in rendering, hit-testing, resize, the resize/rotate handles
+  and the Inspector (`rotation` is radians; the Inspector shows degrees). `rect | circle
+  | triangle | line` parts all rotate. Part-anchored dimensions follow a rotated part.
+- Selection is multi-select: Shift-click toggles parts, drag on empty space marquees,
+  part/selection move snaps to other parts' edges, arrow keys nudge (Shift = 10× step),
+  Ctrl/Cmd+C/V/D copy/paste/duplicate, and the Inspector offers align & distribute for
+  the current multi-selection.
 - Project persistence: `Scene.serialize()`/`Scene.load()` (schema-versioned `ProjectFile`,
   `src/engine/persistence.ts`) auto-save on change (debounced, flushed on `pagehide`) and
   restore on boot; file open/save (`Save project` / `Open project`, `.diy.json` download/

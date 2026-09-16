@@ -34,6 +34,12 @@ export interface PartKind {
   measure: Measure;
 }
 
+export interface PartLayer {
+  id: string;
+  name: string;
+  visible: boolean;
+}
+
 export interface Part {
   id: string;
   kindId: string;
@@ -46,19 +52,31 @@ export interface Part {
   dimensions: { length: number; width: number; thickness: number };
   shape?: PartShape;
   color?: string;
+  layerId?: string;
 }
 
 export type Anchor =
   | { kind: 'free'; p: Vec2 }
   | { kind: 'part'; partId: string; u: number; v: number };
 
+export type DimensionKind = 'linear' | 'angle' | 'radius' | 'area';
+
+export type LinearAxis = 'x' | 'y' | 'free';
+
 export interface Dimension {
   id: string;
+  kind: DimensionKind;
   a: Anchor;
   b: Anchor;
+  c?: Anchor;
+  points?: Anchor[];
   offset: number;
-  axis: 'x' | 'y';
+  axis: LinearAxis;
+  radiusMode?: 'radius' | 'diameter';
+  target?: number | null;
 }
+
+export type MeasureMode = 'linear' | 'diagonal' | 'angle' | 'radius' | 'area';
 
 export type NoteContextKind = 'general' | 'part' | 'measure';
 
@@ -102,6 +120,7 @@ export interface ProjectFile {
   parts: Part[];
   dimensions: Dimension[];
   notes: Note[];
+  layers?: PartLayer[];
 }
 
 export interface Profile {

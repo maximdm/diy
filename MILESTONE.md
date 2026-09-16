@@ -82,12 +82,13 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
 - [x] Board options menu (toolbar): per-project display-unit override, grid on/off +
       vertical/horizontal line toggles + opacity, snap on/off, rulers with labelled ticks in
       the chosen unit, board colour.
-- [ ] Multi-select and marquee selection.
-- [ ] Copy / paste / duplicate; align and distribute.
-- [ ] Rotation (rendering, hit-testing, resize, anchors) — currently stubbed.
-- [ ] Snap to other parts' edges, not just grid.
-- [ ] Arrow-key nudge; dimension offset drag.
-- [~] Acceptance: `AGENTS.md` limitations are updated; `rotation` stubs remain.
+- [x] Multi-select and marquee selection.
+- [x] Copy / paste / duplicate; align and distribute.
+- [x] Rotation (rendering, hit-testing, resize, anchors) — Inspector field + rotate handle,
+       rotation-aware `Part` → world transforms in `geometry.ts`; dimensions follow rotation.
+- [x] Snap to other parts' edges, not just grid.
+- [x] Arrow-key nudge; dimension offset drag.
+- [x] Acceptance: `AGENTS.md` limitations updated; rotation fully wired.
 
 ## M5 — Layers and history polish
 
@@ -129,8 +130,8 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
       how many sheets/lengths to buy; show cost totals per material.
 - [ ] Export BOM, cut list and tasks to **CSV and printable PDF**, grouped by material.
 - [ ] **Print-to-scale** part templates (1:1) for marking/cutting stock.
-- [ ] **Rotation** (render, hit-test, resize, anchors) and a decision on constraining
-      dimensions (drive geometry) — extends M4.
+- [x] **Rotation** (render, hit-test, resize, anchors) — delivered in M4; dimensions follow a
+       rotated part. Constraining dimensions (drive geometry) remains as PLAN §10 / M8 backlog.
 - [ ] **Build sequence**: notes become ordered assembly steps with part links.
 - [ ] Acceptance: a printed/exported sheet is enough to buy the materials, lay them out, cut
       and assemble — no spreadsheet re-entry.

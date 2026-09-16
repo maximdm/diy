@@ -1,15 +1,16 @@
-import type { Anchor, Dimension, Material, Note, NoteItem, Part, PartKind, Profile, Template, Unit, Vec2 } from '../domain/types';
+import type { Anchor, Dimension, Material, Note, NoteItem, Part, PartKind, PartLayer, Profile, Template, Unit, Vec2 } from '../domain/types';
 import { PROJECT_FORMAT, PROJECT_VERSION, type ProjectFile } from '../domain/types';
-import { anchorCandidates, snap } from './geometry';
+import { anchorCandidates, rotatedPoint, snap } from './geometry';
 
 type Listener = () => void;
 
 interface Snapshot {
   parts: Part[];
+  layers: PartLayer[];
   dimensions: Dimension[];
   notes: Note[];
-  selectedPartId: string | null;
-  selectedDimensionId: string | null;
+  selectedPartIds: string[];
+  selectedDimensionIds: string[];
   selectedNoteId: string | null;
 }
 
@@ -17,6 +18,13 @@ const HIST_LIMIT = 100;
 
 function anchorRefs(a: Anchor, partId: string): boolean {
   return a.kind === 'part' && a.partId === partId;
+}
+
+function dimUsesPart(dim: Dimension, partId: string): boolean {
+  const anchors: Anchor[] = [dim.a, dim.b];
+  if (dim.c) anchors.push(dim.c);
+  if (dim.points) anchors.push(...dim.points);
+  return anchors.some((a) => anchorRefs(a, partId));
 }
 
 function unitPrecision(unit: Unit | null): number | null {
@@ -30,17 +38,27 @@ function clone<T>(value: T): T {
 export class Scene {
   profile: Profile;
   parts: Part[] = [];
+  layers: PartLayer[] = [];
   dimensions: Dimension[] = [];
   notes: Note[] = [];
   customMaterials: Material[] = [];
   customTemplates: Template[] = [];
-  selectedPartId: string | null = null;
-  selectedDimensionId: string | null = null;
+  selectedPartIds: string[] = [];
+  selectedDimensionIds: string[] = [];
   selectedNoteId: string | null = null;
+
+  get selectedDimensionId(): string | null {
+    return this.selectedDimensionIds[0] ?? null;
+  }
   version = 0;
+
+  get selectedPartId(): string | null {
+    return this.selectedPartIds.length ? this.selectedPartIds[this.selectedPartIds.length - 1] : null;
+  }
 
   private displayUnitOverride: Unit | null = null;
   private displayPrecisionOverride: number | null = null;
+  private clipboard: Omit<Part, 'id'>[] = [];
 
   private listeners = new Set<Listener>();
   private counter = 0;
@@ -96,10 +114,11 @@ export class Scene {
   private snapshot(): Snapshot {
     return {
       parts: clone(this.parts),
+      layers: clone(this.layers),
       dimensions: clone(this.dimensions),
       notes: clone(this.notes),
-      selectedPartId: this.selectedPartId,
-      selectedDimensionId: this.selectedDimensionId,
+      selectedPartIds: clone(this.selectedPartIds),
+      selectedDimensionIds: clone(this.selectedDimensionIds),
       selectedNoteId: this.selectedNoteId,
     };
   }
@@ -150,10 +169,11 @@ export class Scene {
 
   private restore(s: Snapshot): void {
     this.parts = s.parts;
+    this.layers = s.layers;
     this.dimensions = s.dimensions;
     this.notes = s.notes;
-    this.selectedPartId = s.selectedPartId;
-    this.selectedDimensionId = s.selectedDimensionId;
+    this.selectedPartIds = s.selectedPartIds;
+    this.selectedDimensionIds = s.selectedDimensionIds;
     this.selectedNoteId = s.selectedNoteId;
     this.touch();
   }
@@ -193,12 +213,214 @@ export class Scene {
     return this.profile.partKinds.find((k) => k.id === id);
   }
 
+  layerById(id: string): PartLayer | undefined {
+    return this.layers.find((l) => l.id === id);
+  }
+
+  layerVisible(layerId: string | null): boolean {
+    if (!layerId) return true;
+    return this.layerById(layerId)?.visible ?? true;
+  }
+
+  isPartVisible(id: string): boolean {
+    const p = this.partById(id);
+    return !p || this.layerVisible(p.layerId ?? null);
+  }
+
+  visibleParts(): Part[] {
+    return this.parts.filter((p) => this.isPartVisible(p.id));
+  }
+
+  partsInLayer(layerId: string | null): Part[] {
+    return this.parts.filter((p) => (p.layerId ?? null) === layerId);
+  }
+
+  isDimensionVisible(dim: Dimension): boolean {
+    const anchors: Anchor[] = [dim.a, dim.b];
+    if (dim.c) anchors.push(dim.c);
+    if (dim.points) anchors.push(...dim.points);
+    return anchors.every((a) => a.kind !== 'part' || this.isPartVisible(a.partId));
+  }
+
+  isNoteVisible(note: Note): boolean {
+    if (note.context.kind === 'part' && (note.context.partId ?? '') && !this.isPartVisible(note.context.partId ?? '')) {
+      return false;
+    }
+    return this.isBoardNote(note);
+  }
+
+  addLayer(name?: string): PartLayer {
+    this.record();
+    const layer: PartLayer = {
+      id: this.nextId('l'),
+      name: name?.trim() || this.nextLayerName(),
+      visible: true,
+    };
+    this.layers.push(layer);
+    this.touch();
+    return layer;
+  }
+
+  updateLayer(id: string, patch: Partial<PartLayer>): void {
+    const l = this.layerById(id);
+    if (!l) return;
+    this.record();
+    Object.assign(l, patch);
+    this.touch();
+  }
+
+  setLayerVisible(id: string, visible: boolean): void {
+    const l = this.layerById(id);
+    if (!l || l.visible === visible) return;
+    this.record();
+    l.visible = visible;
+    if (!visible) {
+      const hidden = new Set(this.parts.filter((p) => p.layerId === id).map((p) => p.id));
+      this.selectedPartIds = this.selectedPartIds.filter((pid) => !hidden.has(pid));
+      this.selectedDimensionIds = this.selectedDimensionIds.filter((did) => {
+        const d = this.dimensions.find((x) => x.id === did);
+        return !d || this.isDimensionVisible(d);
+      });
+      if (this.selectedNoteId) {
+        const n = this.noteById(this.selectedNoteId);
+        if (n && !this.isNoteVisible(n)) this.selectedNoteId = null;
+      }
+    }
+    this.touch();
+  }
+
+  removeLayer(id: string): void {
+    const l = this.layerById(id);
+    if (!l) return;
+    this.record();
+    this.layers = this.layers.filter((x) => x.id !== id);
+    for (const p of this.parts) {
+      if (p.layerId === id) p.layerId = undefined;
+    }
+    this.touch();
+  }
+
+  setPartsLayer(ids: string[], layerId: string | null): void {
+    const targets = ids.map((id) => this.partById(id)).filter((p): p is Part => Boolean(p));
+    if (!targets.length) return;
+    this.record();
+    for (const p of targets) p.layerId = layerId ?? undefined;
+    this.touch();
+  }
+
+  private nextLayerName(): string {
+    const used = new Set(this.layers.map((l) => l.name.toLowerCase()));
+    let n = 1;
+    while (used.has(`layer ${n}`)) n++;
+    return `Layer ${n}`;
+  }
+
   partById(id: string): Part | undefined {
     return this.parts.find((p) => p.id === id);
   }
 
   selectedPart(): Part | undefined {
     return this.selectedPartId ? this.partById(this.selectedPartId) : undefined;
+  }
+
+  selectedParts(): Part[] {
+    return this.selectedPartIds.map((id) => this.partById(id)).filter((p): p is Part => Boolean(p));
+  }
+
+  isPartSelected(id: string): boolean {
+    return this.selectedPartIds.includes(id);
+  }
+
+  selectParts(ids: string[]): void {
+    this.selectedPartIds = [...ids];
+    this.selectedDimensionIds = [];
+    this.selectedNoteId = null;
+    this.touch();
+  }
+
+  togglePartSelected(id: string): void {
+    if (this.isPartSelected(id)) {
+      this.selectedPartIds = this.selectedPartIds.filter((pid) => pid !== id);
+    } else {
+      this.selectedPartIds.push(id);
+    }
+    this.selectedDimensionIds = [];
+    this.selectedNoteId = null;
+    this.touch();
+  }
+
+  copySelection(): void {
+    this.clipboard = this.selectedParts().map(({ id: _id, ...rest }) => rest);
+  }
+
+  paste(): void {
+    if (!this.clipboard.length) return;
+    this.record();
+    const PASTE_OFFSET = 24;
+    const newParts: Part[] = [];
+    for (const pt of this.clipboard) {
+      const p: Part = {
+        ...pt,
+        id: this.nextId('p'),
+        position: { x: pt.position.x + PASTE_OFFSET, y: pt.position.y + PASTE_OFFSET },
+      };
+      this.parts.push(p);
+      newParts.push(p);
+    }
+    this.selectParts(newParts.map((p) => p.id));
+    this.touch();
+  }
+
+  duplicate(): void {
+    this.copySelection();
+    this.paste();
+  }
+
+  alignParts(ids: string[], axis: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'): void {
+    if (ids.length < 2) return;
+    const parts = ids.map((id) => this.partById(id)).filter((p): p is Part => Boolean(p));
+    if (parts.length < 2) return;
+    this.record();
+    let ref: number;
+    if (axis === 'left') ref = Math.min(...parts.map((p) => p.position.x));
+    else if (axis === 'right') ref = Math.max(...parts.map((p) => p.position.x + p.size.x));
+    else if (axis === 'center') {
+      ref = (Math.min(...parts.map((p) => p.position.x)) + Math.max(...parts.map((p) => p.position.x + p.size.x))) / 2;
+    } else if (axis === 'top') ref = Math.min(...parts.map((p) => p.position.y));
+    else if (axis === 'bottom') ref = Math.max(...parts.map((p) => p.position.y + p.size.y));
+    else {
+      ref = (Math.min(...parts.map((p) => p.position.y)) + Math.max(...parts.map((p) => p.position.y + p.size.y))) / 2;
+    }
+    for (const p of parts) {
+      if (axis === 'left') p.position.x = ref;
+      else if (axis === 'right') p.position.x = ref - p.size.x;
+      else if (axis === 'center') p.position.x = ref - p.size.x / 2;
+      else if (axis === 'top') p.position.y = ref;
+      else if (axis === 'bottom') p.position.y = ref - p.size.y;
+      else p.position.y = ref - p.size.y / 2;
+    }
+    this.touch();
+  }
+
+  distributeParts(ids: string[], axis: 'x' | 'y'): void {
+    if (ids.length < 3) return;
+    const parts = ids.map((id) => this.partById(id)).filter((p): p is Part => Boolean(p));
+    if (parts.length < 3) return;
+    this.record();
+    if (axis === 'x') {
+      parts.sort((a, b) => a.position.x - b.position.x);
+      const minX = parts[0].position.x;
+      const maxX = parts[parts.length - 1].position.x;
+      const step = (maxX - minX) / (parts.length - 1);
+      for (let i = 1; i < parts.length - 1; i++) parts[i].position.x = minX + step * i;
+    } else {
+      parts.sort((a, b) => a.position.y - b.position.y);
+      const minY = parts[0].position.y;
+      const maxY = parts[parts.length - 1].position.y;
+      const step = (maxY - minY) / (parts.length - 1);
+      for (let i = 1; i < parts.length - 1; i++) parts[i].position.y = minY + step * i;
+    }
+    this.touch();
   }
 
   addPart(part: Omit<Part, 'id'>): Part {
@@ -220,9 +442,9 @@ export class Scene {
   removePart(id: string): void {
     this.record();
     this.parts = this.parts.filter((p) => p.id !== id);
-    this.dimensions = this.dimensions.filter((d) => !anchorRefs(d.a, id) && !anchorRefs(d.b, id));
+    this.dimensions = this.dimensions.filter((d) => !dimUsesPart(d, id));
     this.notes = this.notes.filter((n) => !(n.context.kind === 'part' && n.context.partId === id));
-    if (this.selectedPartId === id) this.selectedPartId = null;
+    this.selectedPartIds = this.selectedPartIds.filter((pid) => pid !== id);
     this.touch();
   }
 
@@ -238,20 +460,46 @@ export class Scene {
     this.record();
     this.dimensions = this.dimensions.filter((d) => d.id !== id);
     this.notes = this.notes.filter((n) => !(n.context.kind === 'measure' && n.context.dimensionId === id));
-    if (this.selectedDimensionId === id) this.selectedDimensionId = null;
-    this.touch();
-  }
-
-  selectPart(id: string | null): void {
-    this.selectedPartId = id;
-    this.selectedDimensionId = null;
-    this.selectedNoteId = null;
+    this.selectedDimensionIds = this.selectedDimensionIds.filter((pid) => pid !== id);
     this.touch();
   }
 
   selectDimension(id: string | null): void {
-    this.selectedDimensionId = id;
-    this.selectedPartId = null;
+    this.selectedDimensionIds = id ? [id] : [];
+    this.selectedPartIds = [];
+    this.selectedNoteId = null;
+    this.touch();
+  }
+
+  selectDimensions(ids: string[]): void {
+    this.selectedDimensionIds = [...ids];
+    this.selectedPartIds = [];
+    this.selectedNoteId = null;
+    this.touch();
+  }
+
+  toggleDimensionSelected(id: string): void {
+    if (this.selectedDimensionIds.includes(id)) {
+      this.selectedDimensionIds = this.selectedDimensionIds.filter((pid) => pid !== id);
+    } else {
+      this.selectedDimensionIds.push(id);
+    }
+    this.selectedPartIds = [];
+    this.selectedNoteId = null;
+    this.touch();
+  }
+
+  updateDimension(id: string, patch: Partial<Dimension>): void {
+    const d = this.dimensions.find((x) => x.id === id);
+    if (!d) return;
+    this.record();
+    Object.assign(d, patch);
+    this.touch();
+  }
+
+  selectPart(id: string | null): void {
+    this.selectedPartIds = id ? [id] : [];
+    this.selectedDimensionIds = [];
     this.selectedNoteId = null;
     this.touch();
   }
@@ -289,8 +537,8 @@ export class Scene {
 
   selectNote(id: string | null): void {
     this.selectedNoteId = id;
-    this.selectedPartId = null;
-    this.selectedDimensionId = null;
+    this.selectedPartIds = [];
+    this.selectedDimensionIds = [];
     this.touch();
   }
 
@@ -308,6 +556,20 @@ export class Scene {
     if (ctx.kind === 'measure') {
       const d = this.dimensions.find((dm) => dm.id === ctx.dimensionId);
       if (!d) return null;
+      if (d.kind === 'angle') {
+        const a = this.anchorPoint(d.a);
+        return { x: a.x, y: a.y - 30 };
+      }
+      if (d.kind === 'area' && d.points && d.points.length) {
+        let cx = 0;
+        let cy = 0;
+        for (const p of d.points) {
+          const w = this.anchorPoint(p);
+          cx += w.x;
+          cy += w.y;
+        }
+        return { x: cx / d.points.length, y: cy / d.points.length - 30 };
+      }
       const a = this.anchorPoint(d.a);
       const b = this.anchorPoint(d.b);
       return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 30 };
@@ -346,12 +608,13 @@ export class Scene {
     if (anchor.kind === 'free') return anchor.p;
     const p = this.partById(anchor.partId);
     if (!p) return { x: 0, y: 0 };
-    return { x: p.position.x + anchor.u * p.size.x, y: p.position.y + anchor.v * p.size.y };
+    return rotatedPoint(p, { x: anchor.u * p.size.x, y: anchor.v * p.size.y });
   }
 
   resolveAnchor(world: Vec2, toleranceMm: number): Anchor {
     let best: { d: number; part: Part; u: number; v: number } | null = null;
     for (const part of this.parts) {
+      if (!this.isPartVisible(part.id)) continue;
       for (const c of anchorCandidates(part)) {
         const d = Math.hypot(c.x - world.x, c.y - world.y);
         if (!best || d < best.d) best = { d, part, u: c.u, v: c.v };
@@ -379,10 +642,11 @@ export class Scene {
   clear(): void {
     this.record();
     this.parts = [];
+    this.layers = [];
     this.dimensions = [];
     this.notes = [];
-    this.selectedPartId = null;
-    this.selectedDimensionId = null;
+    this.selectedPartIds = [];
+    this.selectedDimensionIds = [];
     this.selectedNoteId = null;
     this.touch();
   }
@@ -398,20 +662,26 @@ export class Scene {
       parts: clone(this.parts),
       dimensions: clone(this.dimensions),
       notes: clone(this.notes),
+      layers: clone(this.layers),
     };
   }
 
   load(file: ProjectFile): void {
     this.parts = clone(file.parts);
+    this.layers = clone(file.layers ?? []);
     this.dimensions = clone(file.dimensions);
     this.notes = file.notes.map((n) => ({ ...n, items: (n.items ?? []).map((it) => ({ ...it })) }));
     this.customMaterials = clone(file.customMaterials ?? []);
     this.customTemplates = clone(file.customTemplates ?? []);
     this.displayUnitOverride = file.displayUnit ?? null;
     this.displayPrecisionOverride = unitPrecision(file.displayUnit ?? null);
-    this.selectedPartId = null;
-    this.selectedDimensionId = null;
+    this.selectedPartIds = [];
+    this.selectedDimensionIds = [];
     this.selectedNoteId = null;
+    for (const d of this.dimensions) {
+      if (!d.kind) d.kind = 'linear';
+      if (!d.axis) d.axis = 'x';
+    }
     this.counter = this.maxIdCounter() + 1;
     this.undoStack = [];
     this.redoStack = [];
@@ -422,6 +692,7 @@ export class Scene {
     let max = 0;
     for (const id of [
       ...this.parts.map((p) => p.id),
+      ...this.layers.map((l) => l.id),
       ...this.dimensions.map((d) => d.id),
       ...this.notes.map((n) => n.id),
       ...this.notes.flatMap((n) => n.items.map((i) => i.id)),

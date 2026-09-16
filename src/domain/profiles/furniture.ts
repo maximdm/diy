@@ -143,7 +143,7 @@ const partKinds: Profile['partKinds'] = [
     label: 'Timber',
     defaultMaterialId: 'timber-45x95',
     defaultLength: 1200,
-    defaultWidth: 95,
+    defaultWidth: 45,
     defaultThickness: 45,
     defaultShape: 'line',
     measure: 'linear' as const,

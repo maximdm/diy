@@ -14,7 +14,15 @@ export type IconName =
   | 'board'
   | 'undo'
   | 'redo'
-  | 'new';
+  | 'new'
+  | 'layers'
+  | 'chevron'
+  | 'eye'
+  | 'eye-off'
+  | 'plus'
+  | 'trash'
+  | 'pencil'
+  | 'search';
 
 const PATHS: Record<IconName, ReactNode> = {
   select: <path d="M6 3.5l11.5 6.8-4.9 1.3-2.4 4.7L6 3.5z" />,
@@ -70,6 +78,45 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="M12 8v8M8 12h8" />
+    </>
+  ),
+  layers: (
+    <>
+      <path d="M12 3l9 4.5-9 4.5-9-4.5L12 3z" />
+      <path d="M3 12l9 4.5 9-4.5" />
+      <path d="M3 16.5L12 21l9-4.5" />
+    </>
+  ),
+  chevron: <path d="M9 6l6 6-6 6" />,
+  eye: (
+    <>
+      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" />
+      <circle cx="12" cy="12" r="2.6" />
+    </>
+  ),
+  'eye-off': (
+    <>
+      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6" />
+      <path d="M4 4l16 16" />
+    </>
+  ),
+  plus: <path d="M12 5v14M5 12h14" />,
+  trash: (
+    <>
+      <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5" />
+      <path d="M10 10.5v5.5M14 10.5v5.5" />
+    </>
+  ),
+  pencil: (
+    <>
+      <path d="M4 20l4.5-1L20 7.5 16.5 4 5 15.5 4 20z" />
+      <path d="M14.5 6l3.5 3.5" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="10.5" cy="10.5" r="6" />
+      <path d="M15 15l5 5" />
     </>
   ),
 };

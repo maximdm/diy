@@ -1,6 +1,6 @@
 import { formatLength } from '../domain/format';
 import type { Scene } from '../engine/scene';
-import type { PartShape } from '../domain/types';
+import type { PartShape, MeasureMode } from '../domain/types';
 import type { Tool, CustomPartSpec } from '../engine/canvasEngine';
 import { CustomPartBuilder } from './CustomPartBuilder';
 
@@ -10,9 +10,13 @@ interface Props {
   kindId: string;
   partShape: PartShape | null;
   customSpec: CustomPartSpec;
+  measureMode: MeasureMode;
+  quickMeasure: boolean;
   onKind: (id: string) => void;
   onPartShape: (shape: PartShape | null) => void;
   onCustomSpec: (spec: CustomPartSpec) => void;
+  onMeasureMode: (m: MeasureMode) => void;
+  onQuickMeasure: (on: boolean) => void;
 }
 
 const SHAPES: { value: PartShape; label: string }[] = [
@@ -22,7 +26,28 @@ const SHAPES: { value: PartShape; label: string }[] = [
   { value: 'line', label: 'Line / rod' },
 ];
 
-export function ToolContext({ scene, tool, kindId, partShape, customSpec, onKind, onPartShape, onCustomSpec }: Props) {
+const MEASURE_MODES: { value: MeasureMode; label: string; hint: string }[] = [
+  { value: 'linear', label: 'Length', hint: 'Axis-aligned length (auto x/y)' },
+  { value: 'diagonal', label: 'Diagonal', hint: 'True distance between two points' },
+  { value: 'angle', label: 'Angle', hint: 'Click vertex, then two arms' },
+  { value: 'radius', label: 'Radius', hint: 'Click centre, then the rim' },
+  { value: 'area', label: 'Area', hint: 'Click points; double-click or click the first to close' },
+];
+
+export function ToolContext({
+  scene,
+  tool,
+  kindId,
+  partShape,
+  customSpec,
+  measureMode,
+  quickMeasure,
+  onKind,
+  onPartShape,
+  onCustomSpec,
+  onMeasureMode,
+  onQuickMeasure,
+}: Props) {
   const unit = scene.displayUnit;
   const precision = scene.displayPrecision;
 
@@ -83,12 +108,29 @@ export function ToolContext({ scene, tool, kindId, partShape, customSpec, onKind
     return (
       <section className="panel">
         <h2>Measurement</h2>
+        <div className="seg">
+          {MEASURE_MODES.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              className={measureMode === m.value ? 'seg-btn active' : 'seg-btn'}
+              title={m.hint}
+              onClick={() => onMeasureMode(m.value)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
         <p className="muted small">
-          Click a corner or edge to start, then click a second point to place the dimension.
+          {MEASURE_MODES.find((m) => m.value === measureMode)?.hint}
           <br />
           <br />
-          Dimensions follow parts when they move.
+          Dimensions follow parts when they move. Hold <b>Q</b> with Select to quick-measure a drag.
         </p>
+        <label className="field check">
+          <input type="checkbox" checked={quickMeasure} onChange={(e) => onQuickMeasure(e.target.checked)} />
+          <span>Quick measure ({quickMeasure ? 'on' : 'off'})</span>
+        </label>
       </section>
     );
   }
