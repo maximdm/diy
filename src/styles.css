@@ -211,6 +211,16 @@ body {
   background-color: transparent;
 }
 
+:root[data-theme='dark'] .profile-picker .select {
+  color-scheme: dark;
+}
+
+.profile-picker .select option,
+.profile-picker .select optgroup {
+  background-color: var(--panel);
+  color: var(--ink);
+}
+
 /* ---------- tool segmented control ---------- */
 
 .tool-group {
