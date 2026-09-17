@@ -22,7 +22,11 @@ export type IconName =
   | 'plus'
   | 'trash'
   | 'pencil'
-  | 'search';
+  | 'search'
+  | 'lock'
+  | 'unlock'
+  | 'up'
+  | 'down';
 
 const PATHS: Record<IconName, ReactNode> = {
   select: <path d="M6 3.5l11.5 6.8-4.9 1.3-2.4 4.7L6 3.5z" />,
@@ -119,6 +123,22 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M15 15l5 5" />
     </>
   ),
+  lock: (
+    <>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="2" />
+      <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" />
+      <circle cx="12" cy="15.5" r="1.6" />
+    </>
+  ),
+  unlock: (
+    <>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="2" />
+      <path d="M8 10.5V8a4 4 0 0 1 7.5-1.8" />
+      <circle cx="12" cy="15.5" r="1.6" />
+    </>
+  ),
+  up: <path d="M6 14.5l6-6 6 6" />,
+  down: <path d="M6 9.5l6 6 6-6" />,
 };
 
 export function Icon({ name }: { name: IconName }) {

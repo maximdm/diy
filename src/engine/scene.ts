@@ -222,6 +222,16 @@ export class Scene {
     return this.layerById(layerId)?.visible ?? true;
   }
 
+  layerLocked(layerId: string | null): boolean {
+    if (!layerId) return false;
+    return this.layerById(layerId)?.locked ?? false;
+  }
+
+  isPartLocked(id: string): boolean {
+    const p = this.partById(id);
+    return !p || this.layerLocked(p.layerId ?? null);
+  }
+
   isPartVisible(id: string): boolean {
     const p = this.partById(id);
     return !p || this.layerVisible(p.layerId ?? null);
@@ -229,6 +239,20 @@ export class Scene {
 
   visibleParts(): Part[] {
     return this.parts.filter((p) => this.isPartVisible(p.id));
+  }
+
+  renderOrderParts(): Part[] {
+    const byLayer = new Map<string, Part[]>();
+    for (const l of this.layers) byLayer.set(l.id, []);
+    const ungrouped: Part[] = [];
+    for (const p of this.parts) {
+      if (p.layerId != null && byLayer.has(p.layerId)) byLayer.get(p.layerId)!.push(p);
+      else ungrouped.push(p);
+    }
+    const out: Part[] = [];
+    for (const l of this.layers) for (const p of byLayer.get(l.id) ?? []) if (this.isPartVisible(p.id)) out.push(p);
+    for (const p of ungrouped) if (this.isPartVisible(p.id)) out.push(p);
+    return out;
   }
 
   partsInLayer(layerId: string | null): Part[] {
@@ -287,6 +311,29 @@ export class Scene {
       }
     }
     this.touch();
+  }
+
+  setLayerLocked(id: string, locked: boolean): void {
+    const l = this.layerById(id);
+    if (!l || (l.locked ?? false) === locked) return;
+    this.record();
+    l.locked = locked;
+    if (locked) {
+      const inLayer = new Set(this.parts.filter((p) => p.layerId === id).map((p) => p.id));
+      this.selectedPartIds = this.selectedPartIds.filter((pid) => !inLayer.has(pid));
+    }
+    this.touch();
+  }
+
+  moveLayer(id: string, dir: 1 | -1): boolean {
+    const i = this.layers.findIndex((l) => l.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= this.layers.length) return false;
+    this.record();
+    const [layer] = this.layers.splice(i, 1);
+    this.layers.splice(j, 0, layer);
+    this.touch();
+    return true;
   }
 
   removeLayer(id: string): void {
@@ -668,7 +715,7 @@ export class Scene {
 
   load(file: ProjectFile): void {
     this.parts = clone(file.parts);
-    this.layers = clone(file.layers ?? []);
+    this.layers = (file.layers ?? []).map((l) => ({ id: l.id, name: l.name, visible: l.visible, locked: l.locked ?? false }));
     this.dimensions = clone(file.dimensions);
     this.notes = file.notes.map((n) => ({ ...n, items: (n.items ?? []).map((it) => ({ ...it })) }));
     this.customMaterials = clone(file.customMaterials ?? []);

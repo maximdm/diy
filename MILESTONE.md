@@ -94,10 +94,16 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
 
 **Goal:** safety and organization for larger projects.
 
-- [ ] Layers: reorder, show/hide, lock.
-- [ ] Keep snapshot undo unless it outgrows the scene; only then move to a command pattern
-      in `Scene`.
-- [ ] Acceptance: layers included in save/load and undo.
+- [x] Layers shipped (v0.2): group selected parts into layers, rename (inline, double-click or
+      pencil), show/hide, find (search filters part rows; a click jumps to and fits the part),
+      and delete a layer without destroying its parts; part rows offer rename/delete.
+- [x] Layers ride the undo history and survive save/load (`ProjectFile.layers`).
+- [x] Hidden layers are excluded from hit-testing, marquee selection, edge-snapping and exports.
+- [x] Layer reorder (up/down buttons → z-order on the canvas) and layer lock (locked layer's
+      parts can't be selected, moved, resized, rotated or edited; locking deselects them).
+      Reorder and lock ride the undo history and survive save/load.
+- [x] Keep snapshot undo unless it outgrows the scene; only then move to a command pattern.
+- [x] Acceptance: layers included in save/load and undo.
 
 ## M6 — Output
 
@@ -135,6 +141,15 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
 - [ ] **Build sequence**: notes become ordered assembly steps with part links.
 - [ ] Acceptance: a printed/exported sheet is enough to buy the materials, lay them out, cut
       and assemble — no spreadsheet re-entry.
+
+## M9 — Appearance and mobile (v0.2)
+
+**Goal:** the board looks right on any screen and matches the maker's taste.
+
+- [x] Light / grey / dark appearance modes (Board menu → Theme), persisted per browser
+      (`draw-try:theme`) and applied via `data-theme` CSS tokens.
+- [x] Mobile-friendly layout: bottom sheet ("Tools & lists") with a persistent pill tab on
+      small screens; the right-hand panels slide up instead of squeezing inline.
 
 ## Backlog / ideas
 

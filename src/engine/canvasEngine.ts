@@ -220,7 +220,7 @@ export class CanvasEngine {
   }
 
   fit(): void {
-    const parts = this.scene.visibleParts();
+    const parts = this.scene.renderOrderParts();
     if (parts.length === 0 && this.scene.notes.length === 0) return;
     let minX = Infinity;
     let minY = Infinity;
@@ -330,7 +330,7 @@ export class CanvasEngine {
       }
     }
 
-    for (const part of this.scene.visibleParts()) this.svgPart(push, part);
+    for (const part of this.scene.renderOrderParts()) this.svgPart(push, part);
     for (const dim of this.scene.dimensions) {
       if (this.scene.isDimensionVisible(dim)) this.svgDimension(push, dim, trim);
     }
@@ -728,7 +728,7 @@ export class CanvasEngine {
     if (this.tool === 'select') {
       const selection = this.scene.selectedParts();
       const primary = this.scene.selectedPart();
-      if (selection.length === 1 && primary) {
+      if (selection.length === 1 && primary && !this.scene.isPartLocked(primary.id)) {
         if (this.hitRotateHandle(s, primary)) {
           const c = partCenter(primary);
           const w0 = this.toWorld(s);
@@ -758,7 +758,7 @@ export class CanvasEngine {
           this.scene.begin();
           this.mode = {
             kind: 'move',
-            grabs: selection.map((p) => ({ id: p.id, start: { x: p.position.x, y: p.position.y } })),
+            grabs: selection.filter((p) => !this.scene.isPartLocked(p.id)).map((p) => ({ id: p.id, start: { x: p.position.x, y: p.position.y } })),
             grab: { x: w.x - part.position.x, y: w.y - part.position.y },
           };
           return;
@@ -979,7 +979,7 @@ export class CanvasEngine {
           if (this.snapEnabled) {
             if (part) {
               const others = this.scene.parts
-                .filter((p) => p.id !== grabbed.id && this.scene.isPartVisible(p.id))
+                .filter((p) => p.id !== grabbed.id && this.scene.isPartVisible(p.id) && !this.scene.isPartLocked(p.id))
                 .map(worldAABB);
               const snapped = this.edgeSnap(part.size, grabbed.start, { x: ox, y: oy }, others, 6 / this.cam.scale);
               offX = snapped.x;
@@ -995,7 +995,7 @@ export class CanvasEngine {
           }
           for (const g of this.mode.grabs) {
             const p = this.scene.partById(g.id);
-            if (p) {
+            if (p && !this.scene.isPartLocked(g.id)) {
               this.scene.updatePart(g.id, {
                 position: { x: g.start.x + offX, y: g.start.y + offY },
               });
@@ -1187,7 +1187,7 @@ export class CanvasEngine {
         const r1 = this.toWorld({ x: maxX, y: maxY });
         const hit = new Set<string>();
         for (const part of this.scene.parts) {
-          if (!this.scene.isPartVisible(part.id)) continue;
+          if (!this.scene.isPartVisible(part.id) || this.scene.isPartLocked(part.id)) continue;
           const a = worldAABB(part);
           if (a.minX <= r1.x && a.maxX >= r0.x && a.minY <= r1.y && a.maxY >= r0.y) hit.add(part.id);
         }
@@ -1329,9 +1329,10 @@ export class CanvasEngine {
   };
 
   private hitPart(w: Vec2): Part | undefined {
-    for (let i = this.scene.parts.length - 1; i >= 0; i--) {
-      const p = this.scene.parts[i];
-      if (!this.scene.isPartVisible(p.id)) continue;
+    const order = this.scene.renderOrderParts();
+    for (let i = order.length - 1; i >= 0; i--) {
+      const p = order[i];
+      if (this.scene.isPartLocked(p.id)) continue;
       if (partContains(w, p)) return p;
     }
     return undefined;
@@ -1424,7 +1425,7 @@ export class CanvasEngine {
     ctx.fillStyle = this.canvasColor;
     ctx.fillRect(0, 0, this.width, this.height);
     if (this.gridVisible) this.drawGrid(ctx);
-    for (const part of this.scene.visibleParts()) this.drawPart(ctx, part);
+    for (const part of this.scene.renderOrderParts()) this.drawPart(ctx, part);
     for (const dim of this.scene.dimensions) {
       if (this.scene.isDimensionVisible(dim)) this.drawDimension(ctx, dim);
     }

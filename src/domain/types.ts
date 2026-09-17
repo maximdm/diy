@@ -38,6 +38,7 @@ export interface PartLayer {
   id: string;
   name: string;
   visible: boolean;
+  locked?: boolean;
 }
 
 export interface Part {

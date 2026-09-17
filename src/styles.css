@@ -1376,6 +1376,12 @@ select.select {
   cursor: not-allowed;
 }
 
+.icon-btn.is-on {
+  background: rgba(47, 109, 246, 0.12);
+  color: var(--profile);
+  border-color: rgba(47, 109, 246, 0.4);
+}
+
 .layer-search {
   display: flex;
   align-items: center;
@@ -1447,6 +1453,10 @@ select.select {
 
 .layer-row.off {
   opacity: 0.55;
+}
+
+.layer-row.locked .layer-name-text {
+  color: var(--muted);
 }
 
 .chev {
@@ -1552,6 +1562,15 @@ select.select {
 
 .part-row.off {
   opacity: 0.5;
+}
+
+.part-row.locked {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.part-row.locked .part-row-actions .icon-btn {
+  opacity: 0.45;
 }
 
 .part-dot {

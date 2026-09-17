@@ -15,6 +15,7 @@ interface Group {
   name: string;
   layerId: string | null;
   visible: boolean;
+  locked: boolean;
   parts: Part[];
 }
 
@@ -39,6 +40,7 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
       name: l.name,
       layerId: l.id,
       visible: l.visible,
+      locked: l.locked ?? false,
       parts: scene.partsInLayer(l.id),
     }));
     rows.push({
@@ -46,6 +48,7 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
       name: 'Ungrouped',
       layerId: null,
       visible: true,
+      locked: false,
       parts: scene.partsInLayer(null),
     });
     return rows;
@@ -54,13 +57,13 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
   const q = query.trim().toLowerCase();
   const matches = useMemo(() => {
     if (!q) return null;
-    const out: { part: Part; badge: string; visible: boolean }[] = [];
+    const out: { part: Part; badge: string; visible: boolean; locked: boolean }[] = [];
     for (const g of groups) {
       for (const p of g.parts) {
         const kind = scene.kind(p.kindId);
         const mat = scene.material(p.materialId);
         const hay = [p.label, kind?.label, mat?.name, g.name].filter(Boolean).join(' ').toLowerCase();
-        if (hay.includes(q)) out.push({ part: p, badge: g.layerId ? g.name : '—', visible: g.visible });
+        if (hay.includes(q)) out.push({ part: p, badge: g.layerId ? g.name : '—', visible: g.visible, locked: g.locked });
       }
     }
     return out;
@@ -143,20 +146,22 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
     scene.setPartsLayer(selectedIds, layer.id);
   };
 
-  const partRow = (p: Part, visible: boolean, on: boolean, badge?: string): ReactNode => (
+  const partRow = (p: Part, visible: boolean, on: boolean, locked: boolean, badge?: string): ReactNode => (
     <div
       key={p.id}
-      className={`part-row${on ? ' sel' : ''}${!visible ? ' off' : ''}`}
+      className={`part-row${on && !locked ? ' sel' : ''}${!visible ? ' off' : ''}${locked ? ' locked' : ''}`}
       role="button"
       tabIndex={0}
-      onClick={(e) => openPart(p.id, e)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') onFocus(p.id);
+      onClick={(e) => {
+        if (!locked) openPart(p.id, e);
       }}
-      title="Click to find on the board · double-click the name to rename"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !locked) onFocus(p.id);
+      }}
+      title={locked ? 'Locked layer — unlock to edit this part' : 'Click to find on the board · double-click the name to rename'}
     >
       <span className="part-dot" style={{ background: dot(p) }} />
-      {editingPart === p.id ? (
+      {editingPart === p.id && !locked ? (
         <input
           ref={partDraftRef}
           className="part-rename"
@@ -185,6 +190,7 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
           type="button"
           className="icon-btn"
           title="Rename part"
+          disabled={locked}
           onClick={(e) => {
             e.stopPropagation();
             startPartRename(p);
@@ -196,6 +202,7 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
           type="button"
           className="icon-btn"
           title="Delete part"
+          disabled={locked}
           onClick={(e) => {
             e.stopPropagation();
             scene.removePart(p.id);
@@ -259,7 +266,7 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
         matches.length === 0 ? (
           <p className="muted">No parts match “{query}”.</p>
         ) : (
-          <div className="layer-list">{matches.map((m) => partRow(m.part, m.visible, scene.isPartSelected(m.part.id), m.badge))}</div>
+          <div className="layer-list">{matches.map((m) => partRow(m.part, m.visible, scene.isPartSelected(m.part.id), m.locked, m.badge))}</div>
         )
       ) : (
         <div className="layer-list">
@@ -267,7 +274,7 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
             const open = !collapsed.has(g.id);
             return (
               <div key={g.id} className="layer-group">
-                <div className={`layer-row${g.visible ? '' : ' off'}`}>
+                <div className={`layer-row${g.visible ? '' : ' off'}${g.locked ? ' locked' : ''}`}>
                   <button
                     type="button"
                     className="icon-btn"
@@ -289,6 +296,36 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
                       <Icon name={g.visible ? 'eye' : 'eye-off'} />
                     </button>
                   )}
+                  {g.layerId && (
+                    <>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Move layer up"
+                        disabled={g.id === scene.layers[0]?.id}
+                        onClick={() => g.layerId && scene.moveLayer(g.id, -1)}
+                      >
+                        <Icon name="up" />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        title="Move layer down"
+                        disabled={g.id === scene.layers[scene.layers.length - 1]?.id}
+                        onClick={() => g.layerId && scene.moveLayer(g.id, 1)}
+                      >
+                        <Icon name="down" />
+                      </button>
+                      <button
+                        type="button"
+                        className={`icon-btn${g.locked ? ' is-on' : ''}`}
+                        title={g.locked ? 'Unlock layer' : 'Lock layer'}
+                        onClick={() => g.layerId && scene.setLayerLocked(g.id, !g.locked)}
+                      >
+                        <Icon name={g.locked ? 'lock' : 'unlock'} />
+                      </button>
+                    </>
+                  )}
                   {editing === g.id ? (
                     <input
                       ref={draftRef}
@@ -303,8 +340,14 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
                     <button
                       type="button"
                       className="layer-name"
-                      title={g.layerId ? 'Select all — double-click to rename' : 'Select all ungrouped parts'}
-                      onClick={() => g.parts.length && scene.selectParts(g.parts.map((p) => p.id))}
+                      title={
+                        g.locked
+                          ? 'Layer is locked'
+                          : g.layerId
+                            ? 'Select all — double-click to rename'
+                            : 'Select all ungrouped parts'
+                      }
+                      onClick={() => !g.locked && g.parts.length && scene.selectParts(g.parts.map((p) => p.id))}
                       onDoubleClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -353,7 +396,7 @@ export function LayersPanel({ scene, version, onFocus }: Props) {
                 </div>
                 {open && g.parts.length > 0 && (
                   <div className="layer-parts">
-                    {g.parts.map((p) => partRow(p, g.visible, scene.isPartSelected(p.id)))}
+                    {g.parts.map((p) => partRow(p, g.visible, scene.isPartSelected(p.id), g.locked))}
                   </div>
                 )}
               </div>
