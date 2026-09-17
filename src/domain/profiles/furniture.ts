@@ -11,6 +11,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#d8b26a',
     supplier: 'Local yard',
+    stock: [{ length: 2400 }, { length: 4800 }],
   },
   {
     id: 'timber-45x145',
@@ -22,6 +23,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#c99f57',
     supplier: 'Local yard',
+    stock: [{ length: 2400 }, { length: 4800 }],
   },
   {
     id: 'plywood-18',
@@ -33,6 +35,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm2',
     color: '#e3cfa5',
     supplier: 'Local yard',
+    stock: [{ length: 2440, width: 1220 }],
   },
   {
     id: 'mdf-18',
@@ -44,6 +47,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm2',
     color: '#d9cbb3',
     supplier: 'Local yard',
+    stock: [{ length: 2440, width: 1220 }],
   },
   {
     id: 'hardwood-25',
@@ -54,6 +58,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 24.0,
     unitLabel: 'm',
     color: '#a9703f',
+    stock: [{ length: 2400 }, { length: 4800 }],
   },
   {
     id: 'bolt-m8',

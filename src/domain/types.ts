@@ -11,6 +11,14 @@ export interface Vec2 {
   y: number;
 }
 
+export interface StockOption {
+  name?: string;
+  length: number;
+  width?: number;
+  thickness?: number;
+  costPerPiece?: number;
+}
+
 export interface Material {
   id: string;
   name: string;
@@ -21,6 +29,7 @@ export interface Material {
   unitLabel: string;
   color: string;
   supplier?: string;
+  stock?: StockOption[];
 }
 
 export interface PartKind {

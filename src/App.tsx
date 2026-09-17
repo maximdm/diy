@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { profileById, profiles } from './domain/profiles';
+import { computeBom, computeCutList, computeStockPlan } from './domain/bom';
+import { buildListsCsv } from './domain/export';
+import { computeTasks } from './domain/tasks';
 import type { MeasureMode, PartShape, Profile, Unit } from './domain/types';
 import { Scene } from './engine/scene';
 import { autosave, loadProject, parseProject } from './engine/persistence';
@@ -203,6 +206,26 @@ export default function App() {
     URL.revokeObjectURL(a.href);
   }, [scene]);
 
+  const handleExportCsv = useCallback(() => {
+    const materials = scene.materials;
+    const parts = scene.parts;
+    const csv = buildListsCsv({
+      materials,
+      bom: computeBom(materials, parts),
+      cuts: computeCutList(materials, parts),
+      stock: computeStockPlan(materials, parts),
+      tasks: computeTasks(scene.notes),
+      unit: scene.displayUnit,
+      precision: scene.displayPrecision,
+      title: `${scene.profile.name} — project lists`,
+    });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `${scene.profile.id}-lists.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [scene]);
+
   const handleSaveProject = useCallback(() => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(scene.serialize(), null, 2)], { type: 'application/json' }));
@@ -323,6 +346,7 @@ export default function App() {
         onExport={handleExport}
         onExportPdf={handleExportPdf}
         onExportSvg={handleExportSvg}
+        onExportCsv={handleExportCsv}
         onSaveProject={handleSaveProject}
         onOpenProject={handleOpenProject}
         onCanvasColor={handleCanvasColor}

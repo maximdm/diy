@@ -10,6 +10,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 6.5,
     unitLabel: 'm',
     color: '#cfb27a',
+    stock: [{ length: 3600 }, { length: 4800 }],
   },
   {
     id: 'timber-50x150',
@@ -20,6 +21,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 9.0,
     unitLabel: 'm',
     color: '#bfa066',
+    stock: [{ length: 3600 }, { length: 4800 }],
   },
   {
     id: 'decking-25x100',
@@ -30,6 +32,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 5.0,
     unitLabel: 'm',
     color: '#b8945f',
+    stock: [{ length: 3600 }],
   },
   {
     id: 'plywood-18',
@@ -40,6 +43,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 24.0,
     unitLabel: 'm2',
     color: '#e3cfa5',
+    stock: [{ length: 2440, width: 1220 }],
   },
   {
     id: 'osb-18',
@@ -50,6 +54,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 12.0,
     unitLabel: 'm2',
     color: '#d8c48f',
+    stock: [{ length: 2440, width: 1220 }],
   },
   {
     id: 'board-panel',

@@ -30,6 +30,7 @@ interface Props {
   onExport: () => void;
   onExportPdf: () => void;
   onExportSvg: () => void;
+  onExportCsv: () => void;
   onSaveProject: () => void;
   onOpenProject: (file: File) => void;
   onCanvasColor: (color: string) => void;
@@ -83,6 +84,7 @@ export function Toolbar({
   onExport,
   onExportPdf,
   onExportSvg,
+  onExportCsv,
   onSaveProject,
   onOpenProject,
   onCanvasColor,
@@ -232,18 +234,22 @@ export function Toolbar({
             <span className="btn-label">Export</span>
           </button>
           {exportOpen && (
-            <div className="board-menu-drop" style={menuPos ?? undefined}>
-              <button type="button" className="menu-item" onClick={onExport}>
+            <div className="board-menu-drop" role="menu" style={menuPos ?? undefined}>
+              <button type="button" className="menu-item" role="menuitem" onClick={onExport}>
                 <Icon name="export" />
                 <span>PNG image</span>
               </button>
-              <button type="button" className="menu-item" onClick={onExportPdf}>
+              <button type="button" className="menu-item" role="menuitem" onClick={onExportPdf}>
                 <Icon name="export" />
                 <span>PDF document</span>
               </button>
-              <button type="button" className="menu-item" onClick={onExportSvg}>
+              <button type="button" className="menu-item" role="menuitem" onClick={onExportSvg}>
                 <Icon name="export" />
                 <span>SVG image</span>
+              </button>
+              <button type="button" className="menu-item" role="menuitem" onClick={onExportCsv}>
+                <Icon name="export" />
+                <span>CSV lists (materials, cuts, tasks)</span>
               </button>
               <div className="menu-sep" />
               <button type="button" className="menu-item" onClick={onSaveProject}>

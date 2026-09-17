@@ -113,7 +113,8 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
 - [~] **Viewport PDF export** — embeds a JPEG of the canvas (hand-rolled writer in
       `src/engine/pdf.ts`, ~96 dpi); the full printable sheet (vector sketch + dimensions +
       notes + cut list) is still missing.
-- [ ] CSV/PDF export of BOM, cut list and task list.
+- [~] CSV/PDF export of BOM, cut list and task list (CSV shipped in M8, printable PDF still
+      missing).
 - [ ] Acceptance: a printed sheet is enough to buy, cut and plant.
 - [~] The DIY hand-off pieces (stock-sheet-optimized BOM, 1:1 print templates, build
       sequence) are broken out into **M8** below.
@@ -132,9 +133,15 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
 
 - [x] **Persistence**: schema-versioned JSON project file + localStorage auto-save/restore
       survive reload (extended M2); file open/save (download/upload `.diy.json`) is done.
-- [ ] **Stock-sheet optimization** for the BOM/cut list: given standard stock sizes, compute
-      how many sheets/lengths to buy; show cost totals per material.
-- [ ] Export BOM, cut list and tasks to **CSV and printable PDF**, grouped by material.
+- [~] **Stock-sheet optimization** for the BOM/cut list: given standard stock sizes, compute
+      how many sheets/lengths to buy; show cost totals per material. **Done**: `computeStockPlan`
+      (`src/domain/bom.ts`) packs linear cuts with first-fit-decreasing bin packing and estimates
+      sheet counts by area, per material with a `stock` list; a **Stock plan** buy-list table
+      (Buy / Pieces / Waste / Cost) feeds `purchaseTotal` — the per-material cost totals in the
+      BOM remain priced at the per-unit rate.
+- [~] Export BOM, cut list and tasks to **CSV and printable PDF**, grouped by material.
+      **CSV done** (`src/domain/export.ts` `buildListsCsv`, wired to the export menu → download),
+      printable PDF still missing.
 - [ ] **Print-to-scale** part templates (1:1) for marking/cutting stock.
 - [x] **Rotation** (render, hit-test, resize, anchors) — delivered in M4; dimensions follow a
        rotated part. Constraining dimensions (drive geometry) remains as PLAN §10 / M8 backlog.

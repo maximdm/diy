@@ -10,6 +10,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 32.0,
     unitLabel: 'm',
     color: '#b07a45',
+    stock: [{ length: 2400 }, { length: 4800 }],
   },
   {
     id: 'walnut-20',
@@ -20,6 +21,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 45.0,
     unitLabel: 'm',
     color: '#6b4326',
+    stock: [{ length: 2400 }, { length: 4800 }],
   },
   {
     id: 'pine-18',
@@ -30,6 +32,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 8.0,
     unitLabel: 'm',
     color: '#d8b26a',
+    stock: [{ length: 2400 }, { length: 4800 }],
   },
   {
     id: 'cedar-20',
@@ -40,6 +43,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 14.0,
     unitLabel: 'm',
     color: '#c08a55',
+    stock: [{ length: 2400 }, { length: 4800 }],
   },
   {
     id: 'ply-12',
@@ -50,6 +54,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 38.0,
     unitLabel: 'm2',
     color: '#e3cfa5',
+    stock: [{ length: 2440, width: 1220 }],
   },
   {
     id: 'ply-18',
@@ -60,6 +65,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 52.0,
     unitLabel: 'm2',
     color: '#ddc89a',
+    stock: [{ length: 2440, width: 1220 }],
   },
   {
     id: 'mdf-16',
@@ -70,6 +76,7 @@ const materials: Profile['materials'] = [
     costPerUnit: 11.0,
     unitLabel: 'm2',
     color: '#d9cbb3',
+    stock: [{ length: 2440, width: 1220 }],
   },
   {
     id: 'veneer',
