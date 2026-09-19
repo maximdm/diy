@@ -167,14 +167,19 @@ as undoable scene updates.
 
 - Sketch: PNG (done), viewport PDF (done — JPEG embedded via the hand-rolled writer in
   `src/engine/pdf.ts`, ~96 dpi, no vector drawing) and **SVG** (done — `CanvasEngine.exportSvg()`,
-  world-space vector: board + grid + parts + dimensions + notes). Next is a **true printable
-  sheet** (sketch + dimensions + notes + cut list).
+  world-space vector: board + grid + parts + dimensions + notes). The **printable lists PDF** is
+  done too (`src/engine/pdfLists.ts`, multi-page A4: BOM + stock plan + cut list + tasks, grouped
+  by material, cost totals, repeated column headers). The **combined vector sheet** is done too —
+  `src/engine/printSheet.ts` puts the sketch, dimensions and notes plus all the lists on one
+  A4 document.
 - **Lists are the real product.** BOM and cut list export to CSV/PDF, grouped by material,
-  with cost totals — but the cut list must be *buyable*: **stock-sheet optimization** takes
+  with cost totals — and the cut list is *buyable*: **stock-sheet optimization** takes
   standard stock sizes (e.g. 2440×1220 plywood, 2400×45×45 pine) and computes how many
   sheets/lengths to actually purchase, not just raw area/length.
-- **Print-to-scale part templates.** Export a single part at 1:1 so it can be printed, taped
-  to stock and used to mark/drill/cut directly off the paper. Fits the mm world space.
+- **Print-to-scale part templates.** Done — export any selected part at 1:1
+  (`src/engine/printTemplate.ts` `buildPrintTemplatePdf`): shape outline from the physical
+  dimensions, dimension lines, a 100 mm verification bar; parts larger than a sheet are
+  skipped with a notice.
 - Project file: schema-versioned `ProjectFile` JSON that round-trips a `Scene` — auto-saved
   to localStorage and restored on boot (done), plus file download/upload via `Save project` /
   `Open project` in the export menu (done).
@@ -194,8 +199,9 @@ Decided so far (see MILESTONE.md for sequencing):
 
 - **Notes/tasks**: a `Note` is now a **multi-item checklist** with a `context`
   (`general | part | measure`); contextual notes anchor to a part/dimension and follow it.
-  The Tasks panel expands every item into a task, grouped by context. Next step is ordered
-  assembly steps (see §11).
+  The Tasks panel expands every item into a task, grouped by context. Assembly **build
+  sequence** is done: a note can be marked as a step (`Note.step`, reorderable via ↑/↓ in the
+  Notes panel) and its items flow, in order, into the task list and exports.
 - **Undo/redo**: snapshot-based in `Scene` first; command pattern only if it outgrows
   snapshots.
 - **Paint layer**: deferred with the media milestone, not a part kind.
@@ -220,14 +226,16 @@ high-value additions, in priority order:
    I buy and what does it cost."* Add **stock-sheet optimization** (given standard sizes,
    compute how many sheets/lengths to buy) and **export the list** to printable PDF + CSV,
    grouped by material with cost totals. Extends M6.
-3. **Print-to-scale part templates.** Export a part at 1:1 so it can be printed, taped to
-   stock and used to mark/drill/cut. Fits the mm world space; high delight, low cost.
+3. **Print-to-scale part templates.** Done (`src/engine/printTemplate.ts`, export-menu
+   "PDF cut templates (1:1, selected parts)"); every selected part gets a sheet with its
+   true-scale outline and a 100 mm verification bar.
 4. **Dimensions that mean something + rotation.** Most real pieces are angled (mitres,
-   triangles). Add rotation (render/hit-test/resize/anchors) and decide whether a dimension
-   can optionally carry a constraint that drives geometry. Unlocks joinery. Extends M4.
-5. **Build sequence in the to-do list.** Turn notes into ordered assembly steps with the
-   existing part links, so the Tasks panel reads "step 1 … step N" rather than loose
-   reminders.
+   triangles). **Rotation is done** (render/hit-test/resize/anchors, M4). Open decision:
+   can a dimension optionally carry a constraint that drives geometry? Unlocks joinery.
+5. **Build sequence in the to-do list.** Done — a note can be marked as an *assembly step*
+   (`Note.step`) and reordered; steps and their items render in order in the Notes/tasks
+   panel and feed the CSV and lists PDF, so hand-off reads "step 1 … step N".
 
-Recommended first slice: **#1 + #2** — together they turn Draw-Try from a sketchpad into the
-thing you plan a build with and take to the store.
+Recommended first slice: **#1 + #2** — done. Together they turn Draw-Try from a sketchpad into
+the thing you plan a build with and take to the store, and the **combined vector sheet**
+(`src/engine/printSheet.ts`) puts that sketch and the lists on one printable page.

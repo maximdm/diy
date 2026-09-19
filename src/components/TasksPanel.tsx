@@ -17,7 +17,11 @@ function defaultTitle(ctx: NoteContext, scene: Scene): string {
 }
 
 export function TasksPanel({ scene, version }: Props) {
-  const notes = useMemo(() => scene.notes, [scene, version]);
+  const notes = useMemo(() => {
+    const steps = scene.stepNotes();
+    const rest = scene.notes.filter((n) => n.step == null);
+    return [...steps, ...rest];
+  }, [scene, version]);
   const openCount = useMemo(
     () => notes.reduce((sum, n) => sum + n.items.filter((i) => !i.checked).length, 0),
     [notes],
@@ -73,6 +77,9 @@ export function TasksPanel({ scene, version }: Props) {
 function NoteCard({ scene, note, selected }: { scene: Scene; note: Note; selected: boolean }) {
   const ctx = note.context;
   const done = note.items.filter((i) => i.checked).length;
+  const stepNotes = scene.notes.filter((n) => n.step != null).sort((a, b) => (a.step ?? 0) - (b.step ?? 0));
+  const stepIndex = stepNotes.findIndex((n) => n.id === note.id);
+  const isStep = note.step != null;
 
   const changeContext = (kind: NoteContext['kind']): void => {
     if (kind === 'part') {
@@ -171,6 +178,33 @@ function NoteCard({ scene, note, selected }: { scene: Scene; note: Note; selecte
         <button className="btn small" onClick={() => scene.addNoteItem(note.id, '')}>
           + Add item
         </button>
+        <div className="note-step-ctl">
+          <button
+            className="btn small"
+            title="Move earlier in the build sequence"
+            disabled={!isStep || stepIndex <= 0}
+            onClick={() => scene.moveNoteStep(note.id, -1)}
+          >
+            ⇧
+          </button>
+          <button
+            className="btn small"
+            title="Move later in the build sequence"
+            disabled={!isStep || stepIndex < 0 || stepIndex >= stepNotes.length - 1}
+            onClick={() => scene.moveNoteStep(note.id, 1)}
+          >
+            ⇩
+          </button>
+          <label className="step-toggle" title="Order this note into an assembly step">
+            <input
+              type="checkbox"
+              checked={isStep}
+              onChange={(e) => scene.setNoteStep(note.id, e.target.checked ? stepNotes.length + 1 : null)}
+            />
+            <span>Step</span>
+          </label>
+          {isStep && <span className="step-chip">#{note.step}</span>}
+        </div>
         {note.items.length > 0 && <span className="muted small">{done}/{note.items.length} done</span>}
       </div>
     </div>

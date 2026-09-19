@@ -109,6 +109,7 @@ export interface Note {
   items: NoteItem[];
   board: boolean;
   position?: Vec2;
+  step?: number;
 }
 
 export interface Template {

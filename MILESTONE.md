@@ -53,7 +53,7 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
       leatherworking.
 - [x] Materials carry `category`; the shipped profiles have categorized catalogs surfaced as
       `<optgroup>` in the material picker and group rows in the BOM/cut list.
-- [~] Acceptance: adding a profile requires **no** `engine/` changes (proven, twelve times);
+- [x] Acceptance: adding a profile requires **no** `engine/` changes (proven, twelve times);
       a saved board survives reload (localStorage auto-save/restore).
 
 ## M3 — Notes, arrows and tasks
@@ -110,14 +110,16 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
 **Goal:** make the board workshop-ready.
 
 - [x] SVG export (vector, scale-safe — world-space shapes, dimensions, notes and grid).
-- [~] **Viewport PDF export** — embeds a JPEG of the canvas (hand-rolled writer in
-      `src/engine/pdf.ts`, ~96 dpi); the full printable sheet (vector sketch + dimensions +
-      notes + cut list) is still missing.
-- [~] CSV/PDF export of BOM, cut list and task list (CSV shipped in M8, printable PDF still
-      missing).
-- [ ] Acceptance: a printed sheet is enough to buy, cut and plant.
-- [~] The DIY hand-off pieces (stock-sheet-optimized BOM, 1:1 print templates, build
-      sequence) are broken out into **M8** below.
+- [x] **Viewport PDF export** — embeds a JPEG of the canvas (hand-rolled writer in
+      `src/engine/pdf.ts`, ~96 dpi). The full printable **project sheet** is done too:
+      `src/engine/printSheet.ts` `buildPrintSheetPdf` puts the vector sketch (grid, parts,
+      dimensions, notes) on one A4 page with the BOM, stock plan, cut list and tasks.
+- [x] CSV/PDF export of BOM, cut list and task list (CSV + printable multi-page PDF shipped,
+      grouped by material with cost totals; tasks carry their assembly-step number).
+- [x] Acceptance: a printed sheet is enough to buy, cut and plant — the project sheet plus
+      the 1:1 cut templates hand off the whole build.
+- [x] The DIY hand-off pieces (stock-sheet-optimized BOM, 1:1 print templates, build
+      sequence) shipped in **M8** below.
 
 ## M7 — Collaboration (deferred)
 
@@ -133,20 +135,28 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
 
 - [x] **Persistence**: schema-versioned JSON project file + localStorage auto-save/restore
       survive reload (extended M2); file open/save (download/upload `.diy.json`) is done.
-- [~] **Stock-sheet optimization** for the BOM/cut list: given standard stock sizes, compute
-      how many sheets/lengths to buy; show cost totals per material. **Done**: `computeStockPlan`
+- [x] **Stock-sheet optimization** for the BOM/cut list: given standard stock sizes, compute
+      how many sheets/lengths to buy; show cost totals per material. `computeStockPlan`
       (`src/domain/bom.ts`) packs linear cuts with first-fit-decreasing bin packing and estimates
       sheet counts by area, per material with a `stock` list; a **Stock plan** buy-list table
       (Buy / Pieces / Waste / Cost) feeds `purchaseTotal` — the per-material cost totals in the
       BOM remain priced at the per-unit rate.
-- [~] Export BOM, cut list and tasks to **CSV and printable PDF**, grouped by material.
-      **CSV done** (`src/domain/export.ts` `buildListsCsv`, wired to the export menu → download),
-      printable PDF still missing.
-- [ ] **Print-to-scale** part templates (1:1) for marking/cutting stock.
+- [x] Export BOM, cut list and tasks to **CSV and printable PDF**, grouped by material.
+      CSV (`src/domain/export.ts` `buildListsCsv`) and a multi-page A4 PDF
+      (`src/engine/pdfLists.ts` `buildListsPdf`, hand-rolled writer in `src/engine/pdf.ts`)
+      are wired to the export menu; the PDF repeats column headers across pages and shows the
+      purchase total.
+- [x] **Print-to-scale part templates** (1:1) for marking/cutting stock —
+      `src/engine/printTemplate.ts` `buildPrintTemplatePdf`: one sheet per selected part at
+      true scale (shape outline from the physical dimensions, length/width dimension lines,
+      a 100 mm verification scale bar); parts that don't fit a sheet are skipped with a status
+      notice.
 - [x] **Rotation** (render, hit-test, resize, anchors) — delivered in M4; dimensions follow a
        rotated part. Constraining dimensions (drive geometry) remains as PLAN §10 / M8 backlog.
-- [ ] **Build sequence**: notes become ordered assembly steps with part links.
-- [ ] Acceptance: a printed/exported sheet is enough to buy the materials, lay them out, cut
+- [x] **Build sequence**: a note can be marked as an *assembly step* (`Note.step`, set and
+      reordered with the ↑/↓ controls in the Notes panel); steps read "step 1 … step N" and
+      their items flow into the BOM/cut/task lists, CSV and lists PDF in order.
+- [x] Acceptance: a printed/exported sheet is enough to buy the materials, lay them out, cut
       and assemble — no spreadsheet re-entry.
 
 ## M9 — Appearance and mobile (v0.2)
@@ -161,12 +171,10 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
 ## Backlog / ideas
 
 - Parameterized templates (set a length, parts recompute) — PLAN §10.
-- Constraining dimensions (drive geometry) — PLAN §10 / M8.
+- Constraining dimensions (drive geometry) — PLAN §10 (only unsent M8 item).
 - Board feet / metal weight helpers per profile.
 - Mobile / touch pointer support (incl. pinch zoom).
 - Test runner wired into `package.json` (none exists yet).
-- The DIY hand-off loop (persistence, stock-optimized BOM export, 1:1 print, rotation/
-  constraints, build sequence) — see **M8**.
 
 ## Media (aspirational, off the critical path)
 

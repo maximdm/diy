@@ -6,6 +6,9 @@ import { computeTasks } from './domain/tasks';
 import type { MeasureMode, PartShape, Profile, Unit } from './domain/types';
 import { Scene } from './engine/scene';
 import { autosave, loadProject, parseProject } from './engine/persistence';
+import { buildListsPdf } from './engine/pdfLists';
+import { buildPrintTemplatePdf } from './engine/printTemplate';
+import { buildPrintSheetPdf } from './engine/printSheet';
 import { CanvasEngine, type CustomPartSpec, type Tool } from './engine/canvasEngine';
 import type { Theme } from './components/Toolbar';
 import { CanvasView } from './components/CanvasView';
@@ -226,6 +229,74 @@ export default function App() {
     URL.revokeObjectURL(a.href);
   }, [scene]);
 
+  const handleExportListsPdf = useCallback(() => {
+    const materials = scene.materials;
+    const parts = scene.parts;
+    const pdf = buildListsPdf({
+      materials,
+      bom: computeBom(materials, parts),
+      cuts: computeCutList(materials, parts),
+      stock: computeStockPlan(materials, parts),
+      tasks: computeTasks(scene.notes),
+      unit: scene.displayUnit,
+      precision: scene.displayPrecision,
+      title: `${scene.profile.name} - project lists`,
+    });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([pdf.buffer as ArrayBuffer], { type: 'application/pdf' }));
+    a.download = `${scene.profile.id}-lists.pdf`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [scene]);
+
+  const handleExportSheet = useCallback(() => {
+    const materials = scene.materials;
+    const parts = scene.parts;
+    const pdf = buildPrintSheetPdf(scene, {
+      materials,
+      bom: computeBom(materials, parts),
+      cuts: computeCutList(materials, parts),
+      stock: computeStockPlan(materials, parts),
+      tasks: computeTasks(scene.notes),
+      unit: scene.displayUnit,
+      precision: scene.displayPrecision,
+      title: `${scene.profile.name} - project sheet`,
+      profileName: scene.profile.name,
+    });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([pdf.buffer as ArrayBuffer], { type: 'application/pdf' }));
+    a.download = `${scene.profile.id}-project-sheet.pdf`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [scene]);
+
+  const handleExportPrintTemplate = useCallback(() => {
+    const parts = scene.selectedParts();
+    if (parts.length === 0) {
+      setStatus('Select one or more parts first, then print their 1:1 cut templates.');
+      return;
+    }
+    const res = buildPrintTemplatePdf(parts, {
+      unit: scene.displayUnit,
+      precision: scene.displayPrecision,
+      materialName: (id) => scene.material(id)?.name,
+    });
+    if (res.pageCount === 0 && res.tooBig.length === parts.length) {
+      setStatus('Selected parts are too large to print at 1:1 on a single sheet.');
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([res.bytes.buffer as ArrayBuffer], { type: 'application/pdf' }));
+    a.download = `${scene.profile.id}-cut-templates.pdf`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setStatus(
+      res.tooBig.length
+        ? `${parts.length - res.tooBig.length} template(s) exported; ${res.tooBig.length} too large for one sheet`
+        : `${res.pageCount} 1:1 cut template(s) exported`,
+    );
+  }, [scene]);
+
   const handleSaveProject = useCallback(() => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(scene.serialize(), null, 2)], { type: 'application/json' }));
@@ -347,6 +418,9 @@ export default function App() {
         onExportPdf={handleExportPdf}
         onExportSvg={handleExportSvg}
         onExportCsv={handleExportCsv}
+        onExportListsPdf={handleExportListsPdf}
+        onExportPrintTemplate={handleExportPrintTemplate}
+        onExportSheet={handleExportSheet}
         onSaveProject={handleSaveProject}
         onOpenProject={handleOpenProject}
         onCanvasColor={handleCanvasColor}

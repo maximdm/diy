@@ -589,6 +589,38 @@ export class Scene {
     this.touch();
   }
 
+  stepNotes(): Note[] {
+    return this.notes.filter((n) => n.step != null).sort((a, b) => (a.step ?? 0) - (b.step ?? 0));
+  }
+
+  setNoteStep(id: string, step: number | null): void {
+    const n = this.noteById(id);
+    if (!n) return;
+    this.record();
+    const others = this.notes.filter((x) => x !== n && x.step != null).sort((a, b) => (a.step ?? 0) - (b.step ?? 0));
+    if (step == null) {
+      n.step = undefined;
+      others.forEach((x, i) => (x.step = i + 1));
+      this.touch();
+      return;
+    }
+    const ordered = [...others];
+    ordered.splice(Math.min(Math.max(1, Math.floor(step)) - 1, ordered.length), 0, n);
+    ordered.forEach((x, i) => (x.step = i + 1));
+    this.touch();
+  }
+
+  moveNoteStep(id: string, dir: -1 | 1): void {
+    const steps = this.notes.filter((n) => n.step != null).sort((a, b) => (a.step ?? 0) - (b.step ?? 0));
+    const i = steps.findIndex((x) => x.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= steps.length) return;
+    this.record();
+    [steps[i], steps[j]] = [steps[j], steps[i]];
+    steps.forEach((x, k) => (x.step = k + 1));
+    this.touch();
+  }
+
   isBoardNote(note: Note): boolean {
     return note.context.kind !== 'general' || note.board;
   }

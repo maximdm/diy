@@ -1053,6 +1053,41 @@ select.select {
   gap: 8px;
 }
 
+.note-step-ctl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.note-step-ctl .btn {
+  padding: 2px 7px;
+  line-height: 1;
+}
+
+.note-step-ctl .step-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  margin-left: 2px;
+}
+
+.note-step-ctl .step-toggle input {
+  accent-color: var(--profile);
+}
+
+.step-chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--profile);
+  border: 1px solid color-mix(in srgb, var(--profile) 45%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
 .note-add-row {
   display: flex;
   flex-wrap: wrap;

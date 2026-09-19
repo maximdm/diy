@@ -166,13 +166,20 @@ Keep profiles as data. Do not put behaviour in them.
   `PROFILE_IDEAS.md`.
 - Dimensions are visual/attached, not constraining; they do not drive part geometry.
 - Notes are implemented (board-anchored + project-level with checkboxes, derived Tasks
-  panel, arrows to parts), but there is no canvas text editing — note text is edited in
-  the Inspector, and note style is fixed (no color/size overrides).
+  panel, arrows to parts, and notes can be ordered into **assembly steps** via `Note.step`),
+  but there is no canvas text editing — note text is edited in the Notes panel, and note
+  style is fixed (no color/size overrides).
 - `Part.size` (visual footprint) and `Part.dimensions` (physical cut) are decoupled: the
   Inspector edits physical dims, the board resize handle edits the footprint.
-- PNG and PDF export of the current viewport only (PNG lossless; PDF embeds a JPEG of the
-  viewport — hand-rolled writer in `src/engine/pdf.ts`, ~96 dpi page size, no vector
-  drawing, no BOM export). SVG export (`CanvasEngine.exportSvg()`) is world-space vector
-  (board + grid + parts + dimensions + notes), gridded like the canvas, no rulers/handles.
+- PNG export of the current viewport (lossless); the viewport PDF embeds a JPEG (~96 dpi,
+  hand-rolled writer in `src/engine/pdf.ts`, no vector drawing). SVG export
+  (`CanvasEngine.exportSvg()`) is world-space vector (board + grid + parts + dimensions +
+  notes), gridded like the canvas, no rulers/handles. The PDF core in `pdf.ts` (multi-page,
+  text + rules, `buildPdfDoc`) also powers the **printable lists PDF**
+  (`src/engine/pdfLists.ts`: BOM + stock plan + cut list + tasks, grouped by material, cost
+  totals), **1:1 cut templates** (`src/engine/printTemplate.ts`: selected parts at true
+  scale with a 100 mm verification bar) and a **combined project sheet**
+  (`src/engine/printSheet.ts`: vector sketch + dimensions + notes plus all the lists on one
+  A4 document).
 
 See `MILESTONE.md` for what comes next and `PLAN.md` for the longer-term design.

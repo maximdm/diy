@@ -60,7 +60,18 @@ export function buildListsCsv(args: BuildListsCsvArgs): string {
   }
 
   if (tasks.length > 0) {
-    rows.push(...section('Tasks (to-do)', ['Done', 'Task'], tasks.map((t) => [t.checked ? 'yes' : 'no', t.text])));
+    const hasSteps = tasks.some((t) => t.step != null);
+    if (hasSteps) {
+      rows.push(
+        ...section(
+          'Tasks (to-do)',
+          ['Step', 'Done', 'Task'],
+          tasks.map((t) => [(t.step ?? '').toString(), t.checked ? 'yes' : 'no', t.text]),
+        ),
+      );
+    } else {
+      rows.push(...section('Tasks (to-do)', ['Done', 'Task'], tasks.map((t) => [t.checked ? 'yes' : 'no', t.text])));
+    }
   }
 
   rows.push(csvRow(['Total cost', formatCurrency(purchaseTotal(bom, stock))]), '');
