@@ -168,6 +168,69 @@ Legend: `[x]` done · `[ ]` not started · `[~]` partial
 - [x] Mobile-friendly layout: bottom sheet ("Tools & lists") with a persistent pill tab on
       small screens; the right-hand panels slide up instead of squeezing inline.
 
+## M10 — Smart cut-list optimizer (done)
+
+**Goal:** the cut list is a *layout* — buyable, cuttable, honest about waste.
+
+- [x] **2D sheet nesting** for `stock` sheet materials in `computeStockPlan` — a maximal-
+      rectangles packer (`src/domain/nesting.ts` `packSheets`) places each part's physical
+      footprint (`Part.dimensions`, with 90° rotation on panels) into the chosen sheet size
+      and reports exact sheet counts, a cut layout and remaining usable offcuts. Pure
+      functions in `domain/`; the stock-plan panel (`BomPanel`) renders the layout as
+      miniature SVG sheets and the lists PDF / project sheet draw it via `Flow.figSheets`.
+- [x] **Kerf + grain as data**: a per-material `kerf` (blade width, mm) on `Material`
+      widens every cut edge in nesting; a per-part `grain: 'free' | 'fixed'` forbids 90°
+      rotation for grain-conscious parts (Inspector control). Saw-cut materials in the
+      furniture/woodworking/construction/metalwork profiles ship with `kerf: 3`.
+- [x] **Linear stock placement**: bin-packed lengths (`packLinearStock`, still
+      first-fit-decreasing) carry a cut sequence with positions and per-length offcuts,
+      shown as colour-coded bars in the stock plan and `Flow.figLinear` in the PDFs.
+- [x] Offcut geometry, kerf and waste % flow into the stock plan, BOM and lists PDF — the
+      same numbers the scrap matcher (M11) will consume; nesting cost (piece counts) came
+      out of the rough area ratio and into real placements, so `purchaseTotal` is based on
+      actual sheets/lengths.
+- [x] Acceptance: given a sheet size and a project, the stock plan reports exact sheet
+      counts, a cut layout and leftover offcuts; editing any part re-derives it automatically
+      (computed, never stored).
+
+## M11 — Scrap & inventory matcher (done)
+
+**Goal:** the leftovers in the workshop become the seed of the next project.
+
+- [x] **Scrap log**: entries are `StockLine`-shaped (material id + available size +
+      length/width/thickness + qty — `ScrapItem`, `src/domain/types.ts`), persisted in the
+      project file (`ProjectFile.scraps`) and mirrored to a per-browser inventory
+      (`draw-try:scraps`); per-material offcuts can be captured from the M10 layout
+      ("+ Save N offcuts to scrap" in the stock plan, `scene.captureOffcuts`).
+- [x] **Fit-test suggestion engine** (no backend): `fitTemplates` (`src/domain/scraps.ts`)
+      scores each template by whether its parts' stock requirements nest inside the logged
+      scraps — deterministic and computed like the BOM, never stored; the multi-bin packers
+      (`packIntoBins` / `packLinearIntoBins`) live in `src/domain/nesting.ts`.
+- [x] Suggestions surface in a **Scrap & ideas** panel; "Start with these parts" drops the
+      template's parts onto the board (ranked buildable-first; partial fits shown with %).
+- [x] Count-type leftovers (spare motors, fixings) are loggable and pin materials but are
+      excluded from geometry fit — only `stock` linear/area materials gate buildability; no
+      mechanical matching in v1.
+- [x] Acceptance: after logging leftover MDF and timber, the app suggests at least one
+      buildable template from the shipped profiles where one exists (verified: planter and
+      bench reach 100% fit from timber + plywood scraps; insufficient scraps are honestly
+      reported as partial fits).
+
+## M12 — Active vs passive build pacing
+
+**Goal:** multi-day builds keep momentum — waiting is a first-class project state.
+
+- [ ] **Waiting steps**: a note marked as an assembly step can be flagged *waiting* with an
+      optional duration (glue cure, paint dry, cool-down, print) — `Note.step` plus waiting
+      data on the note.
+- [ ] **Active / waiting lanes** in the Tasks panel and a project day-plan readout ("next
+      active step after a 4 h glue cure").
+- [ ] **Wait timers** persisted (localStorage) so a reload keeps pending waits; Web
+      Notifications fire when a wait ends while the tab is open (documented browser
+      limitation — no background scheduler).
+- [ ] Acceptance: a multi-day project shows a day plan and flags when a wait completes;
+      reloading the app mid-wait resumes the countdown.
+
 ## Backlog / ideas
 
 - Parameterized templates (set a length, parts recompute) — PLAN §10.

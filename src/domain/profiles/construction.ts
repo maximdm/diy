@@ -11,6 +11,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#cfb27a',
     stock: [{ length: 3600 }, { length: 4800 }],
+    kerf: 3,
   },
   {
     id: 'timber-50x150',
@@ -22,6 +23,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#bfa066',
     stock: [{ length: 3600 }, { length: 4800 }],
+    kerf: 3,
   },
   {
     id: 'decking-25x100',
@@ -33,6 +35,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#b8945f',
     stock: [{ length: 3600 }],
+    kerf: 3,
   },
   {
     id: 'plywood-18',
@@ -44,6 +47,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm2',
     color: '#e3cfa5',
     stock: [{ length: 2440, width: 1220 }],
+    kerf: 3,
   },
   {
     id: 'osb-18',
@@ -55,6 +59,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm2',
     color: '#d8c48f',
     stock: [{ length: 2440, width: 1220 }],
+    kerf: 3,
   },
   {
     id: 'board-panel',

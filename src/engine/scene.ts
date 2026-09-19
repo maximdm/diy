@@ -1,5 +1,7 @@
-import type { Anchor, Dimension, Material, Note, NoteItem, Part, PartKind, PartLayer, Profile, Template, Unit, Vec2 } from '../domain/types';
+import type { Anchor, Dimension, Material, Note, NoteItem, Part, PartKind, PartLayer, Profile, ScrapItem, Template, Unit, Vec2 } from '../domain/types';
 import { PROJECT_FORMAT, PROJECT_VERSION, type ProjectFile } from '../domain/types';
+import { offcutsFromStockLine } from '../domain/scraps';
+import type { StockLine } from '../domain/bom';
 import { anchorCandidates, rotatedPoint, snap } from './geometry';
 
 type Listener = () => void;
@@ -9,6 +11,7 @@ interface Snapshot {
   layers: PartLayer[];
   dimensions: Dimension[];
   notes: Note[];
+  scraps: ScrapItem[];
   selectedPartIds: string[];
   selectedDimensionIds: string[];
   selectedNoteId: string | null;
@@ -41,6 +44,7 @@ export class Scene {
   layers: PartLayer[] = [];
   dimensions: Dimension[] = [];
   notes: Note[] = [];
+  scraps: ScrapItem[] = [];
   customMaterials: Material[] = [];
   customTemplates: Template[] = [];
   selectedPartIds: string[] = [];
@@ -117,6 +121,7 @@ export class Scene {
       layers: clone(this.layers),
       dimensions: clone(this.dimensions),
       notes: clone(this.notes),
+      scraps: clone(this.scraps),
       selectedPartIds: clone(this.selectedPartIds),
       selectedDimensionIds: clone(this.selectedDimensionIds),
       selectedNoteId: this.selectedNoteId,
@@ -172,6 +177,7 @@ export class Scene {
     this.layers = s.layers;
     this.dimensions = s.dimensions;
     this.notes = s.notes;
+    this.scraps = s.scraps;
     this.selectedPartIds = s.selectedPartIds;
     this.selectedDimensionIds = s.selectedDimensionIds;
     this.selectedNoteId = s.selectedNoteId;
@@ -582,6 +588,52 @@ export class Scene {
     this.touch();
   }
 
+  addScrap(item: Omit<ScrapItem, 'id'>): ScrapItem {
+    this.record();
+    const s: ScrapItem = { ...item, id: this.nextId('s') };
+    this.scraps.push(s);
+    this.touch();
+    return s;
+  }
+
+  updateScrap(id: string, patch: Partial<ScrapItem>): void {
+    const s = this.scraps.find((x) => x.id === id);
+    if (!s) return;
+    this.record();
+    Object.assign(s, patch);
+    this.touch();
+  }
+
+  removeScrap(id: string): void {
+    const s = this.scraps.find((x) => x.id === id);
+    if (!s) return;
+    this.record();
+    this.scraps = this.scraps.filter((x) => x.id !== id);
+    this.touch();
+  }
+
+  captureOffcuts(line: StockLine): number {
+    const items = offcutsFromStockLine(line);
+    const added: ScrapItem[] = [];
+    for (const it of items) {
+      const dup = this.scraps.some(
+        (s) =>
+          s.source === 'offcut' &&
+          s.materialId === it.materialId &&
+          s.length === it.length &&
+          s.width === it.width &&
+          s.thickness === it.thickness &&
+          s.note === it.note,
+      );
+      if (!dup) added.push({ ...it, id: this.nextId('s') });
+    }
+    if (added.length === 0) return 0;
+    this.record();
+    this.scraps.push(...added);
+    this.touch();
+    return added.length;
+  }
+
   selectNote(id: string | null): void {
     this.selectedNoteId = id;
     this.selectedPartIds = [];
@@ -742,6 +794,7 @@ export class Scene {
       dimensions: clone(this.dimensions),
       notes: clone(this.notes),
       layers: clone(this.layers),
+      scraps: clone(this.scraps),
     };
   }
 
@@ -752,6 +805,7 @@ export class Scene {
     this.notes = file.notes.map((n) => ({ ...n, items: (n.items ?? []).map((it) => ({ ...it })) }));
     this.customMaterials = clone(file.customMaterials ?? []);
     this.customTemplates = clone(file.customTemplates ?? []);
+    this.scraps = clone(file.scraps ?? []);
     this.displayUnitOverride = file.displayUnit ?? null;
     this.displayPrecisionOverride = unitPrecision(file.displayUnit ?? null);
     this.selectedPartIds = [];
@@ -775,6 +829,7 @@ export class Scene {
       ...this.dimensions.map((d) => d.id),
       ...this.notes.map((n) => n.id),
       ...this.notes.flatMap((n) => n.items.map((i) => i.id)),
+      ...this.scraps.map((s) => s.id),
     ]) {
       const m = /(\d+)$/.exec(id);
       if (m) max = Math.max(max, Number(m[1]));

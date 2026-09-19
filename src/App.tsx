@@ -15,6 +15,7 @@ import { CanvasView } from './components/CanvasView';
 import { Toolbar } from './components/Toolbar';
 import { FloatingTools } from './components/FloatingTools';
 import { BomPanel } from './components/BomPanel';
+import { ScrapPanel } from './components/ScrapPanel';
 import { Inspector } from './components/Inspector';
 import { TasksPanel } from './components/TasksPanel';
 import { ToolContext } from './components/ToolContext';
@@ -484,6 +485,7 @@ export default function App() {
           {tool !== 'part' && tool !== 'dimension' && tool !== 'pan' && <Inspector scene={scene} version={version} />}
           <LayersPanel scene={scene} version={version} onFocus={handleFocusPart} />
           <BomPanel scene={scene} version={version} />
+          <ScrapPanel scene={scene} version={version} onStartTemplate={handleTemplate} />
           <TasksPanel scene={scene} version={version} />
         </aside>
       </div>

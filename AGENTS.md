@@ -171,6 +171,12 @@ Keep profiles as data. Do not put behaviour in them.
   style is fixed (no color/size overrides).
 - `Part.size` (visual footprint) and `Part.dimensions` (physical cut) are decoupled: the
   Inspector edits physical dims, the board resize handle edits the footprint.
+- Scrap & ideas (M11): a `ScrapItem` log (material id + size + qty) is stored in the project
+  file and mirrored to a per-browser inventory; offcuts can be captured from the stock plan
+  in one click; `fitTemplates` scores the profile's templates for buildability from the
+  logged scraps. Fitting is by footprint only — linear scraps match by length and sheet
+  scraps by 2D nesting; scrap cross-section/thickness is display-only and never gates, and
+  count leftovers are loggable but never gate.
 - PNG export of the current viewport (lossless); the viewport PDF embeds a JPEG (~96 dpi,
   hand-rolled writer in `src/engine/pdf.ts`, no vector drawing). SVG export
   (`CanvasEngine.exportSvg()`) is world-space vector (board + grid + parts + dimensions +

@@ -30,6 +30,7 @@ export interface Material {
   color: string;
   supplier?: string;
   stock?: StockOption[];
+  kerf?: number;
 }
 
 export interface PartKind {
@@ -63,6 +64,7 @@ export interface Part {
   shape?: PartShape;
   color?: string;
   layerId?: string;
+  grain?: 'free' | 'fixed';
 }
 
 export type Anchor =
@@ -118,6 +120,17 @@ export interface Template {
   parts: Omit<Part, 'id'>[];
 }
 
+export interface ScrapItem {
+  id: string;
+  materialId: string;
+  length: number;
+  width: number;
+  thickness: number;
+  quantity: number;
+  note?: string;
+  source?: 'manual' | 'offcut';
+}
+
 export const PROJECT_FORMAT = 'draw-try';
 export const PROJECT_VERSION = 1;
 
@@ -132,6 +145,7 @@ export interface ProjectFile {
   dimensions: Dimension[];
   notes: Note[];
   layers?: PartLayer[];
+  scraps?: ScrapItem[];
 }
 
 export interface Profile {

@@ -234,6 +234,18 @@ export function Inspector({ scene, version }: Props) {
       </label>
 
       <label className="field">
+        <span>Grain</span>
+        <select
+          value={part.grain ?? 'free'}
+          onChange={(e) => update({ grain: e.target.value as 'free' | 'fixed' })}
+          title="A fixed grain keeps this part straight during sheet nesting (no 90° rotation)."
+        >
+          <option value="free">Any direction (may rotate)</option>
+          <option value="fixed">Fixed - with the length</option>
+        </select>
+      </label>
+
+      <label className="field">
         <span>Material</span>
         <select value={part.materialId} onChange={(e) => update({ materialId: e.target.value })}>
           {materialCategories(scene.materials).map((cat) => (

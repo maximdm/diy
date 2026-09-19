@@ -1,4 +1,7 @@
 import { approxTextWidth, buildPdfDoc, pdfEscape, winEncode, type PdfPage } from './pdf';
+import { roundTo, mmToDisplay } from '../domain/format';
+import type { Unit } from '../domain/types';
+import type { StockLine } from '../domain/bom';
 
 export const A4_W = 595.28;
 export const A4_H = 841.89;
@@ -30,6 +33,17 @@ export interface Row {
 
 export function fragW(f: Frag): number {
   return approxTextWidth(f.t, f.sm ? 7.5 : 9);
+}
+
+function hexRgb(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim());
+  if (!m) return '0.55 0.53 0.5';
+  const n = parseInt(m[1], 16);
+  return `${(((n >> 16) & 255) / 255).toFixed(3)} ${(((n >> 8) & 255) / 255).toFixed(3)} ${((n & 255) / 255).toFixed(3)}`;
+}
+
+function lengthLabel(mm: number, unit: Unit, precision: number): string {
+  return `${roundTo(mmToDisplay(mm, unit), precision)} ${unit}`;
 }
 
 function fragsWidth(frags: Frag[]): number {
@@ -135,8 +149,86 @@ export class Flow {
     this.push(`q\n${color} rg\n${fmt(x)} ${fmt(A4_H - MARGIN - yTop - h)} ${fmt(w)} ${fmt(h)} re\nf\nQ`);
   }
 
+  private rectStroke(x: number, yTop: number, w: number, h: number, color = '0.6 0.58 0.54', lw = 0.7): void {
+    this.push(`q\n${color} RG\n${fmt(lw)} w\n${fmt(x)} ${fmt(A4_H - MARGIN - yTop - h)} ${fmt(w)} ${fmt(h)} re\nS\nQ`);
+  }
+
   private advance(dh: number): void {
     this.y += dh;
+  }
+
+  figSheets(line: StockLine, unit: Unit, precision: number): void {
+    if (!line.sheets || line.sheets.length === 0) return;
+    const columns = 3;
+    const boxW = 150;
+    const boxH = 104;
+    const gap = 14;
+    const rowW = columns * boxW + (columns - 1) * gap;
+    const x0 = MARGIN + (USABLE - rowW) / 2;
+    const pad = 6;
+    let remaining = line.sheets;
+    let shown = 0;
+
+    while (remaining.length) {
+      const rowSheets = remaining.slice(0, columns);
+      remaining = remaining.slice(columns);
+      this.ensure(boxH + 26);
+      const rowTop = this.y;
+      rowSheets.forEach((s, idx) => {
+        const scale = Math.min((boxW - pad * 2) / s.length, (boxH - pad * 2) / s.width);
+        const dw = s.length * scale;
+        const dh = s.width * scale;
+        const ox = x0 + idx * (boxW + gap) + (boxW - dw) / 2;
+        const oy = rowTop + (boxH - dh) / 2;
+        this.rect(ox, rowTop, boxW, boxH, '1 1 1');
+        this.rectStroke(ox, oy, dw, dh, '0.4 0.38 0.34', 0.8);
+        for (const o of s.offcuts) {
+          this.rectStroke(ox + o.x * scale, oy + (s.width - o.y - o.h) * scale, Math.max(0.5, o.w * scale), Math.max(0.5, o.h * scale), '0.75 0.72 0.68', 0.5);
+        }
+        for (const p of s.placed) {
+          this.rect(ox + p.x * scale, oy + (s.width - p.y - p.h) * scale, Math.max(0.5, p.w * scale), Math.max(0.5, p.h * scale), hexRgb(p.color));
+        }
+        shown += 1;
+      });
+      const waste = line.wastePct;
+      const firstSheet = rowSheets[0];
+      const kerfPart = (line.kerf ?? 0) > 0 ? ` \u00b7 kerf ${roundTo(mmToDisplay(line.kerf!, unit), precision)} ${unit}` : '';
+      const caption = `Sheets ${shown - rowSheets.length + 1}\u2013${shown} of ${line.pieces} \u00b7 ${lengthLabel(firstSheet.length, unit, precision)} x ${lengthLabel(firstSheet.width, unit, precision)} \u00b7 ${Math.round(waste)}% waste${kerfPart}`;
+      this.textAt(MARGIN, rowTop + boxH + 3, 7.5, false, caption, MUTED, 'left');
+      this.advance(boxH + 16);
+    }
+    if (this.available()) this.advance(6);
+  }
+
+  figLinear(line: StockLine, unit: Unit, precision: number): void {
+    if (!line.linear || line.linear.lengths.length === 0) return;
+    const barH = 16;
+    const rowGap = 9;
+    const pal = ['0.62 0.42 0.62', '0.45 0.58 0.78', '0.42 0.68 0.55', '0.82 0.62 0.42', '0.78 0.48 0.44'];
+    const bars = line.linear.lengths.slice(0, 8);
+    this.ensure(bars.length * (barH + rowGap) + 24);
+    const barW = USABLE - 54;
+    const x1 = MARGIN + 52;
+    const labelCol = 48;
+    bars.forEach((b, i) => {
+      const yTop = this.y;
+      const stockLab = lengthLabel(b.stockLength, unit, precision);
+      this.textAt(MARGIN, yTop + 4, 6.5, false, `L${i + 1}`, MUTED);
+      this.rect(MARGIN + labelCol, yTop + 1, barW + 4, barH - 2, '0.97 0.96 0.94');
+      this.rectStroke(MARGIN + labelCol, yTop + 1, barW + 4, barH - 2, '0.6 0.58 0.54', 0.6);
+      const scale = barW / b.stockLength;
+      b.cuts.forEach((c, j) => {
+        this.rect(x1 + c.from * scale, yTop + 3, Math.max(1, c.length * scale), barH - 6, pal[j % pal.length]);
+      });
+      const rightLab = `${Math.round((b.used / b.stockLength) * 100)}% used \u00b7 ${Math.round((b.waste / b.stockLength) * 100)}% waste of ${stockLab}`;
+      this.textAt(A4_W - MARGIN, yTop + 13, 6.5, false, rightLab, MUTED, 'right');
+      this.advance(barH + rowGap);
+    });
+    if (line.linear.lengths.length > bars.length) {
+      this.textAt(MARGIN, this.y, 7, false, `+${line.linear.lengths.length - bars.length} more lengths`, MUTED);
+      this.advance(10);
+    }
+    this.advance(4);
   }
 
   title(s: string): void {

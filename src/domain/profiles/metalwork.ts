@@ -11,6 +11,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#6b7280',
     stock: [{ length: 6000 }],
+    kerf: 3,
   },
   {
     id: 'shs-25',
@@ -22,6 +23,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#78808c',
     stock: [{ length: 6000 }],
+    kerf: 3,
   },
   {
     id: 'tube-33',
@@ -33,6 +35,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#8b95a1',
     stock: [{ length: 6000 }],
+    kerf: 3,
   },
   {
     id: 'angle-40',
@@ -44,6 +47,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#5a626c',
     stock: [{ length: 6000 }],
+    kerf: 3,
   },
   {
     id: 'flat-40',
@@ -55,6 +59,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#9aa0aa',
     stock: [{ length: 6000 }],
+    kerf: 3,
   },
   {
     id: 'plate-3',
@@ -66,6 +71,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm2',
     color: '#7a828c',
     stock: [{ length: 1000, width: 2000 }],
+    kerf: 3,
   },
   {
     id: 'plate-5',
@@ -77,6 +83,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm2',
     color: '#6e7a86',
     stock: [{ length: 1000, width: 2000 }],
+    kerf: 3,
   },
   {
     id: 'bolt-m10',

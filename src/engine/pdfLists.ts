@@ -93,6 +93,10 @@ export function buildListsPdf(args: BuildListsPdfArgs): Uint8Array {
       ],
       rows,
     );
+    for (const l of stock) {
+      if (l.sheets) flow.figSheets(l, unit, precision);
+      if (l.linear) flow.figLinear(l, unit, precision);
+    }
   }
 
   flow.section('Cut list');

@@ -239,3 +239,69 @@ high-value additions, in priority order:
 Recommended first slice: **#1 + #2** — done. Together they turn Draw-Try from a sketchpad into
 the thing you plan a build with and take to the store, and the **combined vector sheet**
 (`src/engine/printSheet.ts`) puts that sketch and the lists on one printable page.
+
+## 12. Next bets: buy less, build more, waste less
+
+The M8/M6 hand-off is done: a board exports a buyable, cuttable, printable project. Three
+bets follow on top of it, ordered by value-per-effort — **cut-optimised buying (M10)**,
+**scrap reuse (M11)**, **build pacing (M12)**. M10 and M11 are done; M12 (build pacing) is
+the live next bet. All three stay inside the existing rules: derived data is computed, never
+stored; the engine and domain stay shape-agnostic; a new domain is still just a profile file.
+
+### Cut-optimised buying (M10)
+
+Where we are: `computeStockPlan` (`src/domain/bom.ts`) already buys stock — linear cuts via
+first-fit-decreasing bin packing, sheet counts estimated by area. It answers "how much to
+buy" but not "how to cut a sheet to get there", and the sheet count is a rough area ratio.
+
+The upgrade is a cut **layout** engine plus honest waste:
+
+- **2D sheet nesting** for `stock` sheet materials: a shelf-based guillotine heuristic places
+  rectangular part footprints (physical `Part.dimensions`, 90° rotation on panels) into the
+  chosen sheet size and reports exact sheet counts, a cut layout and remaining usable
+  offcuts. Exact nesting is NP-hard — ship the heuristic, keep it a pure function in
+  `domain/`, and render the layout in the stock-plan panel and on the lists PDF.
+- **Kerf + grain on `Material`**: per-material `kerf` (blade width) widens every cut edge;
+  a per-part grain flag forbids 90° rotation for timber while panels stay free. Both are
+  data, never hardcoded rules in the engine.
+- **Linear stock placement**: already bin-packed lengths gain a cut sequence and per-length
+  offcuts in the stock plan.
+- Every line that comes out — sheet count, offcut geometry, waste % — is the same input the
+  scrap matcher (M11) consumes, so good layouts and good recommendations share one source.
+  This is the reason the layout must live in `domain/`, not in a drawing routine.
+
+### Scrap reuse (M11) — done
+
+Two halves, both local-first. A "database" is deliberately *not* introduced.
+
+1. **Scrap log.** Shipped — `ScrapItem` entries (material id + size + qty) live in the
+   project file (`ProjectFile.scraps`) and are mirrored to a per-browser inventory
+   (`draw-try:scraps`). Offcuts from an M10 layout are captured into the log in one click
+   ("+ Save N offcuts to scrap" in the stock plan; `scene.captureOffcuts`).
+2. **Suggest micro-projects.** Shipped — `fitTemplates` (`src/domain/scraps.ts`) scores the
+   profile's templates by nesting each part's stock requirement into the logged scraps via
+   the multi-bin packers `packIntoBins` / `packLinearIntoBins` (`src/domain/nesting.ts`),
+   and the Scrap & ideas panel ranks results buildable-first with "Start with these parts"
+   dropping the template onto the board. Deterministic, computed like the BOM, never stored.
+
+Scope guard: dimension-type scraps first (timber, sheet, pipe); the fit-test gates only on
+`stock` linear/area materials. Count-type leftovers — a spare 12V motor, a box of fixings —
+are loggable and pin materials, but have no geometry, so they can't drive fit-based
+suggestions. No mechanical/component matching in v1; if the fit-test engine proves itself,
+matching count inventory is a separate, later feature. Linear scraps match by length (the
+logged cross-section is display metadata only), mirroring the M10 linear cut planner.
+
+### Build pacing (M12)
+
+`Note.step` already orders a build. Add waiting as a first-class state:
+
+- A step can be marked **waiting** with an optional duration (glue cure, paint dry, cool
+  down, print). The Tasks panel then renders active vs waiting lanes, and a project day-plan
+  reads "next active step after a 4 h glue cure" so the maker can split the build across days
+  without losing where they are.
+- **Notifications are a browser-only comfort.** Wait timers persist to localStorage so a
+  reload resumes the countdown; Web Notifications fire when a wait ends while the tab is
+  open. No background scheduler — a closed tab silently loses the notification, and the UI
+  should say so rather than pretend otherwise.
+- Ship the status/timeline first; notifications last. The timeline is the durable value;
+  the ring is the polish.

@@ -11,6 +11,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#b07a45',
     stock: [{ length: 2400 }, { length: 4800 }],
+    kerf: 3,
   },
   {
     id: 'walnut-20',
@@ -22,6 +23,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#6b4326',
     stock: [{ length: 2400 }, { length: 4800 }],
+    kerf: 3,
   },
   {
     id: 'pine-18',
@@ -33,6 +35,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#d8b26a',
     stock: [{ length: 2400 }, { length: 4800 }],
+    kerf: 3,
   },
   {
     id: 'cedar-20',
@@ -44,6 +47,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm',
     color: '#c08a55',
     stock: [{ length: 2400 }, { length: 4800 }],
+    kerf: 3,
   },
   {
     id: 'ply-12',
@@ -55,6 +59,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm2',
     color: '#e3cfa5',
     stock: [{ length: 2440, width: 1220 }],
+    kerf: 3,
   },
   {
     id: 'ply-18',
@@ -66,6 +71,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm2',
     color: '#ddc89a',
     stock: [{ length: 2440, width: 1220 }],
+    kerf: 3,
   },
   {
     id: 'mdf-16',
@@ -77,6 +83,7 @@ const materials: Profile['materials'] = [
     unitLabel: 'm2',
     color: '#d9cbb3',
     stock: [{ length: 2440, width: 1220 }],
+    kerf: 3,
   },
   {
     id: 'veneer',

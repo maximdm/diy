@@ -649,6 +649,10 @@ export function buildPrintSheetPdf(scene: Scene, args: PrintSheetArgs): Uint8Arr
       ],
       rows,
     );
+    for (const l of stock) {
+      if (l.sheets) flow.figSheets(l, unit, precision);
+      if (l.linear) flow.figLinear(l, unit, precision);
+    }
   }
 
   flow.section('Cut list');

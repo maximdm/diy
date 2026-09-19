@@ -1,4 +1,12 @@
 import type { Material, Part, StockOption } from './types';
+import {
+  packLinearStock,
+  packSheets,
+  type LinearNestLength,
+  type NestItem,
+  type PlacedRect,
+  type SheetLayout,
+} from './nesting';
 
 export interface BomLine {
   materialId: string;
@@ -25,6 +33,22 @@ export interface StockCut {
   width: number;
   thickness: number;
   count: number;
+  label?: string;
+  color?: string;
+  rotatable?: boolean;
+}
+
+export interface StockSheetLayout {
+  length: number;
+  width: number;
+  placed: PlacedRect[];
+  offcuts: PlacedRect[];
+  used: number;
+}
+
+export interface StockLinearLayout {
+  kerf: number;
+  lengths: LinearNestLength[];
 }
 
 export interface StockLine {
@@ -39,6 +63,9 @@ export interface StockLine {
   wastePct: number;
   costPerPiece: number;
   cost: number;
+  kerf?: number;
+  sheets?: StockSheetLayout[];
+  linear?: StockLinearLayout;
 }
 
 export function materialQuantity(m: Material, p: Part): number {
@@ -138,67 +165,75 @@ function collectStockCuts(materials: Material[], parts: Part[]): Map<string, Sto
     const m = materials.find((x) => x.id === p.materialId);
     if (!m || m.role !== 'stock' || m.measure === 'count') continue;
     const arr = map.get(m.id) ?? [];
-    arr.push({ length: p.dimensions.length, width: p.dimensions.width, thickness: p.dimensions.thickness, count: p.quantity });
+    arr.push({
+      length: p.dimensions.length,
+      width: p.dimensions.width,
+      thickness: p.dimensions.thickness,
+      count: p.quantity,
+      label: p.label,
+      color: p.color ?? m.color,
+      rotatable: (p.grain ?? 'free') !== 'fixed',
+    });
     map.set(m.id, arr);
   }
   return map;
 }
 
-function packLinear(cuts: StockCut[], stockLength: number): { bins: number; used: number } {
-  const items: number[] = [];
+function letters(cuts: StockCut[]): { length: number; label: string }[] {
+  const out: { length: number; label: string }[] = [];
   for (const c of cuts) {
-    for (let i = 0; i < c.count; i++) items.push(c.length);
+    for (let i = 0; i < c.count; i++) out.push({ length: c.length, label: c.label ?? '' });
   }
-  items.sort((a, b) => b - a);
-  const remaining: number[] = [];
-  let used = 0;
-  for (const len of items) {
-    let placed = false;
-    for (let i = 0; i < remaining.length; i++) {
-      if (remaining[i] >= len) {
-        remaining[i] -= len;
-        used += len;
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      remaining.push(stockLength - len);
-      used += len;
-    }
-  }
-  return { bins: remaining.length, used };
+  return out;
 }
 
-function estimateArea(cuts: StockCut[], opt: StockOption): { pieces: number; used: number } {
-  const L = opt.length;
-  const W = opt.width ?? opt.length;
-  let area = 0;
-  for (const c of cuts) area += c.length * c.width * c.count;
-  return { pieces: Math.max(1, Math.ceil(area / (L * W))), used: area };
+function sheetItems(cuts: StockCut[]): NestItem[] {
+  const out: NestItem[] = [];
+  for (const c of cuts) {
+    for (let i = 0; i < c.count; i++) {
+      out.push({ w: c.length, h: c.width, label: c.label ?? '', color: c.color ?? '#cfcfcf', rotatable: c.rotatable ?? true });
+    }
+  }
+  return out;
+}
+
+function kerfOf(m: Material): number {
+  return Math.max(0, m.kerf ?? 0);
 }
 
 function planLine(m: Material, cuts: StockCut[], opt: StockOption): StockLine {
   const perPiece = stockPieceCost(m, opt);
   const cutCount = cuts.reduce((s, c) => s + c.count, 0);
+  const kerf = kerfOf(m);
   if (m.measure === 'linear') {
-    const { bins, used } = packLinear(cuts, opt.length);
-    const capacity = bins * opt.length;
+    const plan = packLinearStock(letters(cuts), opt.length, kerf);
+    const pieces = plan.lengths.length + plan.skipped;
+    const capacity = plan.capacity > 0 ? plan.capacity : pieces * opt.length;
     return {
       materialId: m.id,
       name: m.name,
       category: m.category,
       optionName: opt.name ?? '',
       optionLength: opt.length,
-      pieces: bins,
+      pieces,
       cutCount,
-      wastePct: capacity > 0 ? (1 - used / capacity) * 100 : 0,
+      wastePct: capacity > 0 ? (1 - plan.used / capacity) * 100 : 0,
       costPerPiece: perPiece,
-      cost: bins * perPiece,
+      cost: pieces * perPiece,
+      kerf,
+      linear: { kerf, lengths: plan.lengths },
     };
   }
-  const { pieces, used } = estimateArea(cuts, opt);
-  const capacity = pieces * opt.length * (opt.width ?? opt.length);
+  const plan = packSheets(sheetItems(cuts), opt.length, opt.width ?? opt.length, kerf);
+  const pieces = plan.sheets.length;
+  const capacity = plan.capacity > 0 ? plan.capacity : pieces * opt.length * (opt.width ?? opt.length);
+  const sheets: StockSheetLayout[] = plan.sheets.map((s: SheetLayout) => ({
+    length: s.length,
+    width: s.width,
+    placed: s.placed,
+    offcuts: s.offcuts,
+    used: s.used,
+  }));
   return {
     materialId: m.id,
     name: m.name,
@@ -208,9 +243,11 @@ function planLine(m: Material, cuts: StockCut[], opt: StockOption): StockLine {
     optionWidth: opt.width,
     pieces,
     cutCount,
-    wastePct: capacity > 0 ? Math.max(0, 1 - used / capacity) * 100 : 0,
+    wastePct: capacity > 0 ? Math.max(0, 1 - plan.used / capacity) * 100 : 0,
     costPerPiece: perPiece,
     cost: pieces * perPiece,
+    kerf,
+    sheets,
   };
 }
 
